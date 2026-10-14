@@ -6,11 +6,14 @@ Releasing and publishing are two separate steps here. A release is a git tag; pu
 on Maven Central. Only the second one is permanent, so only the second one can go wrong.
 
 ```sh
-./scripts/release.sh --dry-run patch    # say what would happen; changes nothing
-./scripts/release.sh patch              # bump, verify, commit, tag, push
-./scripts/publish-central.sh            # build, sign, check the layout, upload
-./scripts/publish-central.sh --release  # ... and publish it (irreversible)
+./scripts/release.sh --dry-run patch      # say what would happen; changes nothing
+./scripts/release.sh patch                # bump, verify, commit, tag, push
+./scripts/publish-central.sh --publish    # build, sign, check, upload, validate, publish
+./scripts/publish-central.sh              # the same, stopping at VALIDATED to look first
 ```
+
+Publishing is one command, and `VALIDATED` is a gate inside it rather than a stage of its own —
+see [publishing.md](publishing.md), section 2.
 
 ---
 

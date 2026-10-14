@@ -193,9 +193,9 @@ if [ "$DRY_RUN" -eq 1 ]; then
     echo "  Not touched by this script: pom.xml's plugin and dependency <version> elements, and the"
     echo "  historical version numbers in docs/. A released version's notes are a record, not a pin."
     echo
-    echo "  Publishing is a separate step, after the tag:"
-    echo "    ./scripts/publish-central.sh            # builds, signs, checks the layout, uploads"
-    echo "    ./scripts/publish-central.sh --release  # ... and then publishes it (irreversible)"
+    echo "  Publishing is a separate step, after the tag, and it is one command:"
+    echo "    ./scripts/publish-central.sh --publish  # build, sign, check, upload, validate, publish"
+    echo "    ./scripts/publish-central.sh --dry-run  # the same, but uploads nothing"
     exit 0
 fi
 
@@ -271,4 +271,4 @@ echo "  main and v$NEXT pushed"
 
 say "v$NEXT is tagged"
 echo "  The workflow on the tag checks that it agrees with the pom:  gh run list --workflow=release.yml --limit 1"
-echo "  To publish it:  ./scripts/publish-central.sh   (then --release, which is irreversible)"
+echo "  To publish it:  ./scripts/publish-central.sh --publish   (one command, irreversible)"

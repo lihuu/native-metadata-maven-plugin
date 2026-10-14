@@ -2,9 +2,32 @@
 # Publish this plugin to Maven Central.
 #
 # Usage:
-#   ./scripts/publish-central.sh              # build, sign, assemble, validate; uploads, stops before publishing
+#   ./scripts/publish-central.sh              # build, sign, check, upload, wait for VALIDATED, then stop
+#   ./scripts/publish-central.sh --publish    # the release: the same flow, then publish that deployment
 #   ./scripts/publish-central.sh --dry-run    # the same, minus the upload: nothing leaves this machine
-#   ./scripts/publish-central.sh --release    # ... and then publish it (irreversible)
+#
+# A release is one command, and it is `--publish`.
+#
+# The other two modes are diagnostics, and neither is a step of a release: the bare run leaves the
+# deployment validated and unpublished so a human can look at it, and --dry-run stops before the
+# upload entirely.
+#
+# ---------------------------------------------------------------------------------------------
+# Why publishing happens inside this run rather than in a second one
+#
+# Uploading and publishing used to be two runs of this script. The first uploaded, waited for
+# VALIDATED and stopped; the second rebuilt the whole artifact set, uploaded it as a *second*
+# deployment, and published that one. Two consequences, both bad: the artifact that was published was
+# never the artifact that was validated -- it was a fresh build, and a fresh build is only the same
+# artifact if nothing moved in between -- and every release left the first deployment behind on the
+# Portal, where an unpublished one does nothing but expire.
+#
+# So it is one run with one upload now. VALIDATED has not moved and has not weakened: it is still the
+# hard gate in the middle of the run, and a deployment that does not reach it is never published; the
+# gate did not go away, the second run did. What it protects against is unchanged too -- the last
+# thing standing between a bundle Central rejects after a full build and a version number that can
+# never be used again is this one status poll.
+#
 #
 # ---------------------------------------------------------------------------------------------
 # Why this is a script of its own rather than `mvn -Pcentral deploy`
@@ -51,7 +74,7 @@ cd "$(dirname "$0")/.."
 ROOT="$(pwd)"
 
 DRY_RUN=0
-RELEASE=0
+PUBLISH=0
 
 say() { printf '\n=== %s\n' "$1"; }
 fail() { printf 'publish-central.sh: %s\n' "$1" >&2; exit 1; }
@@ -59,13 +82,18 @@ fail() { printf 'publish-central.sh: %s\n' "$1" >&2; exit 1; }
 for arg in "$@"; do
     case "$arg" in
         --dry-run) DRY_RUN=1 ;;
-        --release) RELEASE=1 ;;
-        -h|--help) sed -n '2,8p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+        --publish) PUBLISH=1 ;;
+        --release)
+            # A named refusal rather than a fall-through to "unknown option". It is the one option a
+            # returning user will type, and what it used to mean is exactly what this change removed.
+            fail "--release is gone; it used to rebuild the bundle and upload a second deployment, so a release paid for two builds and left two deployments on the Portal. Publishing now happens inside the run that validated the deployment. Use --publish"
+            ;;
+        -h|--help) sed -n '2,13p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
         *) fail "unknown option: $arg" ;;
     esac
 done
-if [ "$DRY_RUN" -eq 1 ] && [ "$RELEASE" -eq 1 ]; then
-    fail "--dry-run and --release contradict each other; a dry run uploads nothing, so there is nothing to release"
+if [ "$DRY_RUN" -eq 1 ] && [ "$PUBLISH" -eq 1 ]; then
+    fail "--dry-run and --publish contradict each other; a dry run uploads nothing, so there is no deployment to publish"
 fi
 
 # ------------------------------------------------------------------ the signing key
@@ -382,25 +410,42 @@ for group, messages in (d.get("errors") or {}).items():
 fi
 echo "  VALIDATED"
 
-# ------------------------------------------------------------------ publish
+# ------------------------------------------------------------------ stop, or publish that one deployment
 #
-# Deliberately two steps. Uploading is reversible -- a validated deployment that is never published
-# simply expires -- and publishing is not: a version on Central cannot be withdrawn, and a version
-# number that has been used can never be used again.
-if [ "$RELEASE" -eq 0 ]; then
+# One upload per run, and this is the only place $ID is used a second time: the deployment published
+# here is the one that reached VALIDATED a few lines up, in this run, from the bundle this run
+# assembled. Nothing is rebuilt and nothing is uploaded again -- that is the whole point of the
+# change, and the header says why it used to be otherwise.
+#
+# Without --publish the run ends here, and that is deliberate. Publishing is not reversible: a version
+# on Central cannot be withdrawn and its number can never be used again, while an unpublished
+# deployment merely expires. Expiry is the only cheap undo Central offers, so the mode that stops and
+# lets a human look is worth keeping -- it is just not a step anyone has to run first, and not a step
+# of a release.
+if [ "$PUBLISH" -eq 0 ]; then
     say "validated, not published"
-    echo "  Publishing is permanent: a version cannot be withdrawn from Central once it is out."
-    echo "  To publish this deployment:"
-    echo "    ./scripts/publish-central.sh --release   (rebuilds and uploads a fresh one)"
-    echo "  or release the one that is already validated:"
-    echo "    curl -X POST -H \"Authorization: Bearer ...\" \\"
+    echo "  This was a diagnostic run: deployment $ID is validated and unpublished, so it can be looked"
+    echo "  at before it becomes permanent. An unpublished deployment expires; nothing is pending forever."
+    echo "  To publish this exact deployment:"
+    echo "    curl -X POST -H \"Authorization: Bearer <token>\" \\"
     echo "      https://central.sonatype.com/api/v1/publisher/deployment/$ID"
+    echo "  To do the whole thing as one command next time:  ./scripts/publish-central.sh --publish"
     exit 0
 fi
 
-say "publishing"
-curl -sS -X POST -H "Authorization: Bearer $TOKEN" \
-     "https://central.sonatype.com/api/v1/publisher/deployment/$ID" -o /dev/null -w '  HTTP %{http_code}\n'
+# The response code is read rather than discarded. A refusal here -- an expired token, a deployment
+# that is no longer releasable -- would otherwise look exactly like Central being slow, and the run
+# would sit in the twenty-minute sync poll below before finally saying so.
+say "publishing deployment $ID"
+code=$(curl -sS -X POST -H "Authorization: Bearer $TOKEN" \
+         "https://central.sonatype.com/api/v1/publisher/deployment/$ID" -o /dev/null -w '%{http_code}')
+case "$code" in
+    2*) echo "  accepted (HTTP $code)" ;;
+    *)
+        echo >&2
+        fail "the Portal answered HTTP $code to the publish of deployment $ID. Whether that deployment was published cannot be told from here; check https://central.sonatype.com/publishing/deployments"
+        ;;
+esac
 
 say "waiting for it to reach Maven Central"
 i=0
