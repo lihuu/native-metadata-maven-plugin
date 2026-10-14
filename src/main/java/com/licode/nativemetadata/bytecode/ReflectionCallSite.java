@@ -1,0 +1,14 @@
+package com.licode.nativemetadata.bytecode;
+
+import org.jetbrains.annotations.NotNull;
+
+public record ReflectionCallSite(
+        @NotNull String target,
+        @NotNull String member,
+        @NotNull String descriptor,
+        @NotNull String opcode,
+        @NotNull String caller,
+        @NotNull String callerMethod,
+        @NotNull String callerDescriptor,
+        @NotNull String source
+) {}
