@@ -128,10 +128,22 @@
     </build>
 
     <profiles>
+        <!--
+          The profile that produces what Maven Central accepts, and nothing more.
+
+          Activate it with -Pcentral (scripts/publish-central.sh does). It is deliberately not called
+          "release": a release in this repository is a git tag cut by scripts/release.sh, and a
+          profile that sounds like the same thing is a profile someone activates expecting a tag.
+          Building and publishing are two steps, and only the second one is permanent.
+        -->
         <profile>
-            <id>release</id>
+            <id>central</id>
             <build>
                 <plugins>
+                    <!-- Central refuses a bundle that has a jar without its sources and its javadoc
+                         jar beside it, and there is no way to add them afterwards: the upload is the
+                         whole version. Both are attached here so `mvn -Pcentral verify` is already the
+                         complete artifact set. -->
                     <plugin>
                         <groupId>org.apache.maven.plugins</groupId>
                         <artifactId>maven-source-plugin</artifactId>
@@ -150,7 +162,11 @@
                         <artifactId>maven-javadoc-plugin</artifactId>
                         <version>3.11.2</version>
                         <configuration>
+                            <!-- A doc-comment lint failing a publication is a trade nobody asked
+                                 for: the javadoc jar's contents are not inspected by Central, and a
+                                 warning about a missing @param should not be what stops a release. -->
                             <doclint>none</doclint>
+                            <quiet>true</quiet>
                         </configuration>
                         <executions>
                             <execution>
@@ -165,6 +181,26 @@
                         <groupId>org.apache.maven.plugins</groupId>
                         <artifactId>maven-gpg-plugin</artifactId>
                         <version>3.2.7</version>
+                        <configuration>
+                            <!--
+                              `gpgArguments`, not a `pinentryMode` element. This plugin has no such
+                              parameter, and naming one that does not exist is silently ignored:
+                              Maven prints "Parameter 'pinentryMode' is unknown for plugin" as a
+                              warning and signs anyway, so a configuration that does nothing looks
+                              exactly like one that works. Checked against the plugin's own
+                              plugin.xml rather than against the documentation.
+
+                              loopback is what keeps a headless run from opening a pinentry dialog
+                              and hanging until it times out. It needs the key to have no
+                              passphrase, or one supplied through passphraseEnvName; the key this
+                              repository documents (docs/publishing.md) is generated with
+                              %no-protection for exactly this reason.
+                            -->
+                            <gpgArguments>
+                                <arg>--pinentry-mode</arg>
+                                <arg>loopback</arg>
+                            </gpgArguments>
+                        </configuration>
                         <executions>
                             <execution>
                                 <id>sign-artifacts</id>
@@ -175,6 +211,25 @@
                             </execution>
                         </executions>
                     </plugin>
+                    <!--
+                      The plugin is used for the one thing it is good at (signing, validating and
+                      bundling this module into a Central-shaped tree) and NOT for uploading.
+
+                      What it does wrong for this repository is treat its own staging directory as a
+                      Maven *local repository*, so the install mechanism writes bookkeeping files
+                      into the tree it is about to publish: maven-metadata-local.xml at the
+                      artifactId level (a directory with no .pom in it, which Central rejects
+                      outright), _remote.repositories beside each artifact, and a checksum for each
+                      of those. `-Dmaven.install.skip=true` does not stop it, a dedicated
+                      -Dmaven.repo.local does not stop it, and the plugin exposes no file-level
+                      filter: excludeArtifacts matches whole modules. That is why
+                      scripts/publish-central.sh assembles the bundle itself from target/ and uploads
+                      it through the same Portal API. See docs/publishing.md.
+
+                      autoPublish=false and waitUntil=validated are the safe half of the same
+                      decision: a version on Central cannot be withdrawn, so nothing here publishes
+                      unless the publish script is given its release flag.
+                    -->
                     <plugin>
                         <groupId>org.sonatype.central</groupId>
                         <artifactId>central-publishing-maven-plugin</artifactId>
@@ -182,8 +237,8 @@
                         <extensions>true</extensions>
                         <configuration>
                             <publishingServerId>central</publishingServerId>
-                            <autoPublish>true</autoPublish>
-                            <waitUntil>published</waitUntil>
+                            <autoPublish>false</autoPublish>
+                            <waitUntil>validated</waitUntil>
                         </configuration>
                     </plugin>
                 </plugins>
