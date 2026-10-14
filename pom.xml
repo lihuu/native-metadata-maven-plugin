@@ -9,7 +9,7 @@
     <version>1.0.0</version>
     <packaging>maven-plugin</packaging>
 
-    <name>native-metadata-maven-plugin</name>
+    <name>Native Metadata Maven Plugin</name>
     <description>Maven plugin for GraalVM native-image reflection metadata analysis, de-duplication, and rule-based pruning.</description>
     <url>https://github.com/lihuu/native-metadata-maven-plugin</url>
 
