@@ -68,8 +68,8 @@ A release is a git tag; publishing to Maven Central is a separate, deliberate st
 ```sh
 ./scripts/release.sh --dry-run patch    # say what would happen; changes nothing
 ./scripts/release.sh patch              # bump, verify, commit, tag, push
-./scripts/publish-central.sh --dry-run  # build, sign, and check the bundle; uploads nothing
-./scripts/publish-central.sh            # ... then upload it, stopping before publishing
+./scripts/publish-central.sh --publish  # build, sign, check, upload, validate, publish (one command)
+./scripts/publish-central.sh            # the same, stopping at VALIDATED so you can look first
 ```
 
 See [docs/releasing.md](docs/releasing.md) and [docs/publishing.md](docs/publishing.md).
