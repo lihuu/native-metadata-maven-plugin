@@ -61,6 +61,19 @@ Optimizes native metadata configurations in compilation outputs (`target/classes
 ]
 ```
 
+## Releases
+
+A release is a git tag; publishing to Maven Central is a separate, deliberate step.
+
+```sh
+./scripts/release.sh --dry-run patch    # say what would happen; changes nothing
+./scripts/release.sh patch              # bump, verify, commit, tag, push
+./scripts/publish-central.sh --dry-run  # build, sign, and check the bundle; uploads nothing
+./scripts/publish-central.sh            # ... then upload it, stopping before publishing
+```
+
+See [docs/releasing.md](docs/releasing.md) and [docs/publishing.md](docs/publishing.md).
+
 ## License
 
 Apache License 2.0.

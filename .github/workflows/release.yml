@@ -1,0 +1,88 @@
+name: Release
+
+# Tag-triggered, and it checks one thing: the tag and the pom version agree.
+#
+# This repository publishes nothing from CI. A tag is a claim that a version is real, and the release
+# itself is cut locally by scripts/release.sh -- so what is left for this workflow is the check that
+# would otherwise be noticed only after a permanent tag: a tag named vX.Y.Z sitting on a pom that says
+# something else publishes artifacts whose own version contradicts the release name.
+#
+# It runs here and not only in release.sh because a tag cannot be quietly taken back, and because a
+# pushed tag is the last moment to notice. release.sh already refuses to cut a mismatched tag; this is
+# the second reader, on the state that was actually pushed, where a hand-made `git tag` would land.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: the tag and the pom version agree
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # GraalVM because the plugin compiles against the Java 25 Class-File API with
+      # maven.compiler.release=25, and the action already used by ci.yml is the proven way to get a
+      # JDK 25 here. This workflow only reads the pom, but the build below needs the same toolchain
+      # ci.yml uses, or it would fail for a reason that has nothing to do with the tag.
+      - name: Set up GraalVM JDK 25
+        uses: graalvm/setup-graalvm@v1
+        with:
+          java-version: '25'
+          distribution: 'graalvm-community'
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      # Both files, because both state the version: the pom is what Maven publishes and the README's
+      # usage snippet is what a reader copies. A tag that leaves the README behind ships a snippet
+      # pinning a version nobody can resolve.
+      - name: The tag matches the pom and the README
+        run: |
+          python3 - "$GITHUB_REF_NAME" <<'PY'
+          import pathlib, re, sys
+
+          tag = sys.argv[1]
+          if not re.fullmatch(r"v\d+\.\d+\.\d+", tag):
+              sys.exit(f"tag '{tag}' is not v<major>.<minor>.<patch>")
+          expected = tag[1:]
+
+          # Comments are stripped before anything is read. This pom explains itself in comments, and
+          # a comment is one line away from matching the pattern below.
+          def strip_comments(text):
+              return re.sub(r"<!--.*?-->", "", text, flags=re.S)
+
+          problems = []
+
+          pom = strip_comments(pathlib.Path("pom.xml").read_text())
+          if "<parent>" in pom:
+              problems.append("pom.xml has a <parent>; its first <version> is no longer its own, so "
+                              "this check reads the wrong number")
+          else:
+              header = re.split(r"<(?:properties|dependencies|build|profiles|distributionManagement)>",
+                                pom)[0]
+              found = re.search(r"<version>([^<]+)</version>", header)
+              if not found or found.group(1) != expected:
+                  problems.append(f"pom.xml is {found.group(1) if found else 'unreadable'}, "
+                                  f"tag says {expected}")
+
+          pins = re.findall(r"<version>([^<]+)</version>",
+                            pathlib.Path("README.md").read_text())
+          if len(pins) != 1:
+              problems.append(f"README.md has {len(pins)} <version> element(s), expected exactly 1 "
+                              f"(the usage snippet)")
+          elif pins[0] != expected:
+              problems.append(f"README.md's usage snippet is {pins[0]}, tag says {expected}")
+
+          if problems:
+              print("\n".join("  " + p for p in problems), file=sys.stderr)
+              sys.exit("cut the tag with scripts/release.sh, which moves both files together")
+          print(f"  pom.xml and README.md both at {expected}")
+          PY
+
+      # A tag on a tree that does not compile is a tag on nothing. This is not the acceptance gate
+      # -- that is `mvn -Pcentral verify` plus scripts/publish-central.sh -- only the cheapest check
+      # that the tagged revision is the buildable one.
+      - name: The tagged revision builds
+        run: mvn -B -ntp clean test
