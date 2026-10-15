@@ -408,7 +408,8 @@ jobs:
             -Dfile="$PWD/$(find staged -maxdepth 1 -name '*.jar')" \
             -DpomFile="$PWD/staged/pom.xml"
           cp -R examples/plain-native "$RUNNER_TEMP/plain-native"
-          export MAVEN_ARGS="-Dbusiness.release=${{ matrix.java }}"
+          # Append: a bare assignment would drop the workflow-level "-B -ntp".
+          export MAVEN_ARGS="${MAVEN_ARGS:+$MAVEN_ARGS }-Dbusiness.release=${{ matrix.java }}"
           "$RUNNER_TEMP/plain-native/verify.sh" \
             --java-home "$JAVA_HOME" --maven-home "$MAVEN_HOME" \
             --plugin-version "$(sed -n 's:.*<version>\([^<]*\)</version>.*:\1:p' staged/pom.xml | head -1)" \
@@ -494,6 +495,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # The one toolchain here that does not come from docs/validation/toolchains.json: this job only
+      # consumes the staged artifact on a different OS and builds nothing, so it takes its runtime from
+      # the action (a floating major tag, like every other action in this file). The lock file's own
+      # comment records the exception.
       - name: Set up GraalVM 21
         uses: graalvm/setup-graalvm@v1
         with:
