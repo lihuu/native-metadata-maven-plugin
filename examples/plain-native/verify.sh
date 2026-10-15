@@ -79,6 +79,10 @@ fi
 NATIVE_IMAGE="${NATIVE_IMAGE_ARG:-$JAVA_HOME/bin/native-image}"
 EVIDENCE="${EVIDENCE:-$PROJECT_DIR/target/plain-native-evidence}"
 mkdir -p "$EVIDENCE"
+# $EVIDENCE and everything derived from it are used inside `( cd <work> && ... )` subshells below,
+# where a relative --evidence would resolve against the work directory instead. Same failure mode
+# as scripts/verify-compatibility.sh; make it absolute once, here.
+EVIDENCE="$(cd "$EVIDENCE" && pwd)"
 
 # Kept as plain strings: /bin/bash on macOS is 3.2, where expanding an empty array under
 # `set -u` aborts the script.
