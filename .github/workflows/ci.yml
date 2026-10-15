@@ -235,10 +235,18 @@ jobs:
         run: |
           python3 - <<'PY'
           import json
-          data = json.load(open("target/compat/consume-plain-openjdk-17/environment.json"))
-          vendor = data["javaVendor"]
+          # environment.json is written by the running mojo, so its fields are first-hand evidence
+          # about the JVM that executed the goal. The vendor is recorded there as
+          # javaVendorInMavenProcess and as javaVendor in result.json; both are checked, and so is the
+          # feature version, because "not GraalVM" is only half of what this job claims.
+          env = json.load(open("target/compat/consume-plain-openjdk-17/environment.json"))
+          result = json.load(open("target/compat/consume-plain-openjdk-17/result.json"))
+          vendor = env["javaVendorInMavenProcess"]
+          feature = int(env["javaFeatureInMavenProcess"])
           assert "GraalVM" not in vendor, vendor
-          print("vendor:", vendor)
+          assert feature == 17, feature
+          assert result["javaVendor"] == vendor, (result["javaVendor"], vendor)
+          print("vendor:", vendor, "feature:", feature)
           PY
 
       - name: Upload evidence
