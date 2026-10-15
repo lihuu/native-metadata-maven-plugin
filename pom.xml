@@ -223,6 +223,37 @@
                     </execution>
                 </executions>
             </plugin>
+            <!--
+              The Invoker integration test proves that the sample builds and that it consumed the
+              artifact this run produced. It cannot say what pruning *did*: with `clean package` and no
+              verification of its own, a prune that quietly changed nothing would pass it. This step
+              asserts the effect, on the Invoker clone and without a native toolchain - the changelog
+              scope, the narrowed entry, the members the app reflects on, the untouched entries and the
+              untouched sources. Bound to `verify` so it runs after the Invoker's integration-test run.
+            -->
+            <plugin>
+                <groupId>org.codehaus.mojo</groupId>
+                <artifactId>exec-maven-plugin</artifactId>
+                <version>3.5.0</version>
+                <executions>
+                    <execution>
+                        <id>assert-pruning-effect</id>
+                        <phase>verify</phase>
+                        <goals>
+                            <goal>exec</goal>
+                        </goals>
+                        <configuration>
+                            <executable>${project.basedir}/examples/plain-native/verify-pruning.sh</executable>
+                            <arguments>
+                                <argument>--project</argument>
+                                <argument>${project.build.directory}/it/plain-native</argument>
+                                <argument>--source</argument>
+                                <argument>${project.basedir}/examples/plain-native</argument>
+                            </arguments>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
         </plugins>
     </build>
 
