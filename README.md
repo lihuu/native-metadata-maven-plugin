@@ -16,6 +16,11 @@ Three Java versions are easy to confuse, so they are listed separately:
 
 Maven 3.9.9 and 3.10.0 are verified. Maven 4 and Java 8/11 are out of scope for this release.
 
+An input class file the scanner cannot read is an **error**, not something to step over: a class file
+that is too short or corrupt, or one whose class-file version is newer than the bundled ASM supports,
+fails `analyze`/`prune` with the file named. Silently skipping it would report a class as
+unresolvable or unused, and pruning decisions are made from that report. (1.0.0 skipped such files.)
+
 For a native-image project, the recommended setup is to point the IDE project SDK **and** the Maven Runner JRE at the project's own GraalVM (17, 21 or 25). The plugin never requires a second JDK just for scanning, and it never starts a subprocess to inspect bytecode.
 
 ## Goals
