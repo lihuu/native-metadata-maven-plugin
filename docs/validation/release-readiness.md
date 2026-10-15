@@ -11,13 +11,15 @@
 - [x] 本机 Java17/21/25 核心测试、六个 Maven 消费组合和普通 OpenJDK17 补充验证。
 - [x] 普通 Native 与 Spring AOT 原生 A/B/C、Java25 业务字节码验证。
 - [x] 两个独立样例离开插件 checkout 运行；java-pi 实际项目试用通过。
+- [x] 远程 CI 执行并全绿：run `38684961127`（head `d0f1f82`），19/19 jobs PASS，含 acceptance summary。
 - [x] 候选 JAR/POM 和源码清单保存；README 说明运行、构建和业务目标版本的区别。
 
 后续交付门禁：
 
 - [ ] IDEA Maven Runner / Project SDK 手动演练，见 [idea-walkthrough.md](idea-walkthrough.md)。
 - [x] 候选实现已提交并记录 source candidate commit；源码/POM 与已验证产物清单一致。
-- [ ] 运行远程 CI，确认 Linux 与 macOS jobs 的实际结果和上传证据；不能用 YAML 检查代替执行。
+- [x] 运行远程 CI，确认 Linux 与 macOS jobs 的实际结果和上传证据：run `38684961127`，19/19 绿，
+      Linux（六个消费组合、O17、MR、N17/N25、S17/S21）与 macOS 冒烟的 evidence artifact 均已上传。
 - [ ] 在完成候选提交和门禁后，按仓库发布流程生成新版本制品并记录发布产物哈希。
 - [ ] 完成剩余门禁后执行 tag / 发布；本轮用户已授权提交、推送和创建 PR，不执行合并或发布。
 

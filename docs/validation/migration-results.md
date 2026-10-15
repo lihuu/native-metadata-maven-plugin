@@ -23,7 +23,9 @@ Statuses are `PASS`, `FAIL` or `NOT_RUN`. `NOT_RUN` is never a synonym for "prob
 | `native-image` | the `native-image` of the same GraalVM that runs Maven |
 | Host | macOS 27.2, arm64 |
 
-Linux x86_64 CI has **not** been executed here; see AC-11.
+The Linux x86_64 and macOS jobs have since been executed on the pull request; see
+[CI run on the pull request](#ci-run-on-the-pull-request) and AC-11. Everything else below is the
+local record.
 
 ## Acceptance items
 
@@ -39,7 +41,7 @@ Linux x86_64 CI has **not** been executed here; see AC-11.
 | AC-08 | Native A/B/C passes; the negative control fails for the right reason | PASS | `evidence/frozen/plain-native-n17` and `plain-native-n25`: A and B produce `hello-via-field:world` and `APP_OK`, B narrows the consumed config (changelog `NARROWED` + `DELETED`) and keeps the untouched `Unused` entry, C fails with `NoSuchMethodException: com.example.plain.Greeting.describe([Ljava/lang/String;)` |
 | AC-09 | Real Spring AOT output reaches the report and its consumed native path is checked | PASS | `evidence/frozen/s17`, `s21`: `spring-boot:process-aot` runs before `native-metadata:analyze`/`prune`, the report classifies the AOT directory as `GENERATED` (`generatedMetadataDirectories`), and the recorded `-cp` shows `target/classes` first |
 | AC-10 | Spring baseline vs pruned HTTP/dynamic behaviour equivalent, de-duplication effective, negative control valid | PASS | `evidence/frozen/s17`, `s21`: `http-normalised.json` identical between A and B for all three requests; the changelog deletes the self-owned duplicate and names the generated source; A/B `src/` hashes are identical and the set of files Spring AOT generated is unchanged (AOT *content* is deliberately not compared between runs: `Application__BeanFactoryRegistrations` is regenerated on every run and is not byte-stable for the same configuration, see the comment in `examples/spring-boot-native/verify.sh`); C removes the `RuntimeHints` registrar and fails on `/api/dynamic` |
-| AC-11 | No required native scenario silently skipped; commands, exit codes and logs archived | PASS locally / `NOT_RUN` in CI | Local runs assert the staged hash and fail when `native-image` is missing. The Linux workflow and the pinned-toolchain installer are written and were exercised for the installer (real GraalVM 17 / Maven 3.9.9 / 3.10.0 archives resolve to a runnable home, `evidence/installer-*-version.log`), but **no GitHub Actions job has been executed**: `NOT_RUN` |
+| AC-11 | No required native scenario silently skipped; commands, exit codes and logs archived | PASS | Local runs assert the staged hash and fail when `native-image` is missing. The GitHub Actions matrix has now been executed on the pull request: run `38684961127` (head `d0f1f82`), **19/19 jobs green**, including `acceptance summary`, which fails unless every required job succeeded. Key lines from that run: `vendor: Eclipse Adoptium feature: 17` (O17), `consumed configuration changed: true` for each of the six consume cases, `outcomes: A-baseline-PASS,B-pruned-PASS,C-negative-PASS` (S21); see the CI section below |
 | AC-12 | Maintainer terminal/IDEA walkthrough and at least one real project trial | PARTIAL | Real project trial: `java-pi` at `a4381a2c`, isolated copy, against this exact frozen hash - baseline native build + MCP loop, dry-run 102/102 owned types resolved with 0 changes, apply + native build + MCP loop; see [java-pi-trial.md](java-pi-trial.md). IDEA walkthrough: `NOT_RUN` - no IntelliJ installation exists on this machine and no computer-use tool is exposed, so the IDE gate cannot be performed here; the runbook is in [idea-walkthrough.md](idea-walkthrough.md) |
 | AC-13 | README separates Maven JVM, build JDK, business target and native toolchain | PASS | `README.md` "Runtime and compatibility" |
 | AC-14 | Every result belongs to the candidate artifact; release uses a new version number | PARTIAL | Every result is pinned to the 1.1.0 hash above and the harness refuses to run otherwise. The version number is new, so the published Java 25 `1.0.0` is not replaced. The tested sources are now committed as `c20b952726128af25b757ce7325db7039f84f2ce`. Tagging and publishing have not been performed; the release step remains open |
@@ -64,6 +66,42 @@ hash, GraalVM25 and Maven3.9.9: **A/B/C PASS**, actual `App.class` major **69** 
 Evidence: `evidence/plain-business25/{result.json,A-baseline,B-pruned,C-missing-registration}` and
 `evidence/plain-business25.log`. The original N25 run used the sample's default release17; this extra
 case proves the plan's separate Java25 business-bytecode requirement.
+
+## CI run on the pull request
+
+Run [`38684961127`](https://github.com/lihuu/native-metadata-maven-plugin/actions/runs/38684961127)
+on head `d0f1f82` (implementation `c20b952` plus the harness fixes described below): **19 of 19
+jobs PASS**, `acceptance summary` included. That job is the merge gate - it fails unless every
+required job succeeded - so "19/19" is not a count of green checkmarks, it is one run in which
+nothing was skipped.
+
+The workflow could not pass at all before three harness defects were fixed. None of them was in
+the plugin:
+
+1. `scripts/verify-compatibility.sh` kept `--evidence` relative but used it inside `( cd "$WORK" && ... )`.
+   CI passes `--evidence target/compat`, so the consumption log redirect failed before Maven ever
+   started, and `-Dmaven.repo.local` would have pointed into the work copy - an empty repository
+   instead of the one the candidate was staged into. All six consume jobs, the plain-OpenJDK-17 job
+   and the macOS job died on this. `--evidence` is now resolved to an absolute path up front.
+2. The Spring sample compared `target/spring-aot` byte for byte between two separate Maven runs.
+   Spring AOT regenerates that directory on every run and `Application__BeanFactoryRegistrations` is
+   not byte-stable for the same configuration: the GraalVM 21 job produced two different hashes for
+   it across three runs while the untouched `src/` stayed identical. `src/` is still compared byte for
+   byte; the generated directory is now checked by file set, which still catches the plugin adding or
+   removing anything there.
+3. The plain-OpenJDK-17 job asserted on `environment.json["javaVendor"]`, a key that file does not
+   have. The in-Maven record is `javaVendorInMavenProcess`; `javaVendor` is the key in `result.json`.
+   The step had never executed that far before, so it only surfaced as `KeyError: 'javaVendor'` once
+   item 1 was fixed. It now reads the in-Maven record, asserts the feature version is 17, and
+   cross-checks the vendor against `result.json`.
+
+Which artifact CI consumes differs from the frozen one above: the matrix consumes the JAR the `build`
+job produces in the same run (`sha256 c394f4639157b65f37c818942b64306cd404935999651a323d02c649045a9d23`
+for run 38684961127, where the previous run produced a different hash from the same sources). JARs
+are not bit-reproducible - timestamps - so the hash is per-run, and each consume case asserts the
+staged hash equals the input hash before it runs. The property the matrix proves is unaffected: one
+artifact, built once on JDK 25, consumed by all six JDK/Maven combinations, both native suites and
+the macOS job.
 
 ## What the false-green search found
 
