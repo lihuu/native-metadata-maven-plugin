@@ -1,6 +1,6 @@
 # 1.1.0 候选版本与发布准备
 
-当前为未提交、未发布的工作区候选版本，正式验收尚未全部完成。
+候选实现已提交：`c20b952726128af25b757ce7325db7039f84f2ce`；1.1.0 尚未发布，正式验收尚未全部完成。
 
 拟发布变化：最低 Maven JVM 从 Java25 降至 Java17，采用单一 ASM9.11；增加独立原生
 和 Spring AOT 样例、来源分类及运行环境记录；修复迁移验证暴露的权限覆盖、参数类型
@@ -16,9 +16,9 @@
 后续交付门禁：
 
 - [ ] IDEA Maven Runner / Project SDK 手动演练，见 [idea-walkthrough.md](idea-walkthrough.md)。
-- [ ] 审查并提交当前分支，记录 candidateCommit；现有验证明确绑定冻结产物哈希。
+- [x] 候选实现已提交并记录 source candidate commit；源码/POM 与已验证产物清单一致。
 - [ ] 运行远程 CI，确认 Linux 与 macOS jobs 的实际结果和上传证据；不能用 YAML 检查代替执行。
 - [ ] 在完成候选提交和门禁后，按仓库发布流程生成新版本制品并记录发布产物哈希。
-- [ ] 实际 tag / push / PR / 发布按任务授权单独执行；本轮均未执行。
+- [ ] 完成剩余门禁后执行 tag / 发布；本轮用户已授权提交、推送和创建 PR，不执行合并或发布。
 
 当前结果总表见 [migration-results.md](migration-results.md)。
