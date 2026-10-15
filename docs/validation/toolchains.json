@@ -1,0 +1,225 @@
+{
+  "$comment": "Pinned toolchains for the JDK 17 migration. See docs/validation/baseline.md and docs/jdk17-migration-plan.md (P0). Only entries marked verifiedInThisSession=true were downloaded and hash-checked end to end; the Linux CI entries are locked to the vendored .sha256/.sha512 published next to the artifact, which was fetched and recorded but whose tarball was not downloaded here.",
+  "platforms": {
+    "local": {
+      "os": "macOS 27.2",
+      "arch": "aarch64"
+    },
+    "ci": {
+      "os": "Ubuntu 22.04 (GitHub Actions ubuntu-22.04)",
+      "arch": "x86_64"
+    }
+  },
+  "graalvm": [
+    {
+      "id": "graalvm-ce-jdk17",
+      "vendor": "GraalVM Community (Oracle)",
+      "version": "17.0.9+9.1",
+      "jvmci": "23.0-b22",
+      "platform": "macos-aarch64",
+      "url": "https://github.com/graalvm/graalvm-ce-builds/releases/download/jdk-17.0.9/graalvm-community-jdk-17.0.9_macos-aarch64_bin.tar.gz",
+      "sha256": "3eccc4ffda01818172b7fc7cdf4379bc62ed7129ee30ca854c04da67057249c9",
+      "bundlesNativeImage": true,
+      "nativeImageVersion": "17.0.9 2023-10-17",
+      "verifiedInThisSession": true,
+      "usedFor": [
+        "N17",
+        "S17",
+        "U17",
+        "R17",
+        "X17",
+        "MR",
+        "local U17/X17"
+      ]
+    },
+    {
+      "id": "graalvm-ce-jdk17-linux",
+      "vendor": "GraalVM Community (Oracle)",
+      "version": "17.0.9+9.1",
+      "platform": "linux-x64",
+      "url": "https://github.com/graalvm/graalvm-ce-builds/releases/download/jdk-17.0.9/graalvm-community-jdk-17.0.9_linux-x64_bin.tar.gz",
+      "sha256": "e47ba7229cef02393e19d5b8f46f7f1cab4829dd17bfe84d5431fc8ff0e22a96",
+      "sha256Source": "vendor-published .sha256, fetched 2026-10-15; tarball not downloaded in this session",
+      "bundlesNativeImage": true,
+      "verifiedInThisSession": false,
+      "usedFor": [
+        "CI: native-plain-17",
+        "CI: native-spring-17"
+      ]
+    },
+    {
+      "id": "graalvm-ce-jdk21-linux",
+      "vendor": "GraalVM Community (Oracle)",
+      "version": "21.0.2+13.1",
+      "platform": "linux-x64",
+      "url": "https://github.com/graalvm/graalvm-ce-builds/releases/download/jdk-21.0.2/graalvm-community-jdk-21.0.2_linux-x64_bin.tar.gz",
+      "sha256": "b048069aaa3a99b84f5b957b162cc181a32a4330cbc35402766363c5be76ae48",
+      "sha256Source": "vendor-published .sha256, fetched 2026-10-15; tarball not downloaded in this session",
+      "bundlesNativeImage": true,
+      "verifiedInThisSession": false,
+      "usedFor": [
+        "CI: unit-21",
+        "CI: consume graalvm-21"
+      ]
+    },
+    {
+      "id": "graalvm-ce-jdk25-linux",
+      "vendor": "GraalVM Community (Oracle)",
+      "version": "25.0.2+10.1",
+      "platform": "linux-x64",
+      "url": "https://github.com/graalvm/graalvm-ce-builds/releases/download/jdk-25.0.2/graalvm-community-jdk-25.0.2_linux-x64_bin.tar.gz",
+      "sha256": "e0be791c8fda4d03b6b0a0cb824fef3149736170057b3a515252b44419606af0",
+      "sha256Source": "vendor-published .sha256, fetched 2026-10-15; tarball not downloaded in this session",
+      "bundlesNativeImage": true,
+      "verifiedInThisSession": false,
+      "usedFor": [
+        "CI: build (B25)",
+        "CI: native-plain-25"
+      ]
+    },
+    {
+      "id": "graalvm-ce-25.0.2-local",
+      "vendor": "GraalVM Community",
+      "version": "25.0.2+10.1",
+      "platform": "macos-aarch64",
+      "path": "/Users/lihu/Library/Java/JavaVirtualMachines/graalvm-ce-25.0.2/Contents/Home",
+      "bundlesNativeImage": true,
+      "preinstalled": true,
+      "usedFor": [
+        "B25 (build)",
+        "N25",
+        "R25",
+        "MR",
+        "MAC-style smoke"
+      ]
+    },
+    {
+      "id": "oracle-graalvm-21.0.12-local",
+      "vendor": "Oracle GraalVM",
+      "version": "21.0.12+7.1",
+      "platform": "macos-aarch64",
+      "path": "/Library/Java/JavaVirtualMachines/graalvm-21.jdk/Contents/Home",
+      "bundlesNativeImage": true,
+      "preinstalled": true,
+      "usedFor": [
+        "U21",
+        "R21",
+        "MR",
+        "S21",
+        "MAC"
+      ]
+    },
+    {
+      "id": "graalvm-ce-java17-22.3.3-REJECTED",
+      "vendor": "GraalVM Community",
+      "version": "22.3.3",
+      "status": "rejected",
+      "reason": "The spec pinned this distribution for N17/S17. (a) The release publishes no darwin-aarch64 asset, so it cannot run on this development machine at all (graalvm-ce-java17-darwin-aarch64-22.3.3.tar.gz is a 404; the release asset list only has darwin-amd64). (b) Even on linux-x64, 22.3.x does not bundle native-image; it has to be added with 'gu install native-image', which makes the CI setup diverge from what is verified locally. GraalVM CE for JDK 17.0.9 is used instead, for local and CI alike, so both exercise the same toolchain.",
+      "verifiedInThisSession": true
+    }
+  ],
+  "maven": [
+    {
+      "id": "maven-3.9.9",
+      "version": "3.9.9",
+      "platform": "any",
+      "url": "https://archive.apache.org/dist/maven/maven-3/3.9.9/binaries/apache-maven-3.9.9-bin.tar.gz",
+      "sha512": "a555254d6b53d267965a3404ecb14e53c3827c09c3b94b5678835887ab404556bfaf78dcfe03ba76fa2508649dca8531c74bca4d5846513522404d48e8c4ac8b",
+      "verifiedInThisSession": true,
+      "usedFor": [
+        "all locally run cases"
+      ]
+    },
+    {
+      "id": "maven-3.10.0",
+      "version": "3.10.0",
+      "platform": "any",
+      "url": "https://archive.apache.org/dist/maven/maven-3/3.10.0/binaries/apache-maven-3.10.0-bin.tar.gz",
+      "sha512Source": "Apache official .sha512, fetched 2026-10-15; local Maven preinstalled, CI downloads this archive",
+      "usedFor": [
+        "R* with Maven 3.10.0"
+      ],
+      "sha512": "908b1501bfb420bf7c8affb855534a9c407fd6099367bfb9f2f2dcb8e9799102bffb84518cde74c679bd76870247c6528683abdd620581bffa90f95d92d175aa",
+      "localPath": "/opt/homebrew/Cellar/maven/3.10.0/libexec",
+      "verifiedInThisSession": true
+    }
+  ],
+  "plainJdk17": [
+    {
+      "id": "temurin-17",
+      "vendor": "Eclipse Temurin (Adoptium)",
+      "version": "17.0.20.1+1",
+      "platform": "macos-aarch64",
+      "url": "https://api.adoptium.net/v3/binary/latest/17/ga/mac/aarch64/jdk/hotspot/normal/eclipse",
+      "sha256": "196d13ba5f10414bef7f6a05a9b3f00edacb18ebacef2b99485db9e2ee18f0e8",
+      "verifiedInThisSession": true,
+      "usedFor": [
+        "O17 (analysis/pruning only, no native)"
+      ]
+    },
+    {
+      "id": "temurin-17-linux",
+      "vendor": "Eclipse Temurin (Adoptium)",
+      "version": "17.0.20.1+1",
+      "platform": "linux-x64",
+      "url": "https://github.com/adoptium/temurin17-binaries/releases/download/jdk-17.0.20.1%2B1/OpenJDK17U-jdk_x64_linux_hotspot_17.0.20.1_1.tar.gz",
+      "sha256": "3808d1d15e3ec6bd5b84057fb5d84c33d8a1536a258146bcea2e603fc726e08e",
+      "sha256Source": "Adoptium API asset metadata, fetched 2026-10-15; tarball not downloaded in this session",
+      "verifiedInThisSession": false,
+      "usedFor": [
+        "CI: plain-openjdk-17"
+      ]
+    }
+  ],
+  "buildTools": [
+    {
+      "id": "maven-invoker-plugin",
+      "version": "3.10.1",
+      "usedFor": [
+        "in-repo integration tests (src/it + examples)"
+      ]
+    },
+    {
+      "id": "maven-plugin-plugin",
+      "version": "3.15.1",
+      "usedFor": [
+        "plugin descriptor generation"
+      ]
+    },
+    {
+      "id": "asm",
+      "version": "9.11",
+      "usedFor": [
+        "plugin runtime bytecode scanner (single backend)"
+      ]
+    },
+    {
+      "id": "jackson-databind",
+      "version": "2.18.3",
+      "usedFor": [
+        "plugin runtime JSON model"
+      ]
+    },
+    {
+      "id": "spring-boot",
+      "version": "3.5.16",
+      "usedFor": [
+        "examples/spring-boot-native"
+      ]
+    },
+    {
+      "id": "native-maven-plugin",
+      "version": "0.10.6",
+      "usedFor": [
+        "examples/spring-boot-native native build"
+      ]
+    },
+    {
+      "id": "exec-maven-plugin",
+      "version": "3.5.0",
+      "usedFor": [
+        "native-it / spring-native-it profiles"
+      ]
+    }
+  ]
+}

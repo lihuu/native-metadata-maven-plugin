@@ -1,4 +1,5 @@
 package io.github.lihuu.nativemetadata.model;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import org.junit.jupiter.api.Test;
 
@@ -70,4 +71,55 @@ class MetadataDocumentTest {
         assertTrue(reparsed.entries().isEmpty());
         assertTrue(reparsed.rawRoot().containsKey("resources"));
     }
+
+    @Test
+    void unsupportedEntriesAreCountedAndRefuseToBeSerialized() {
+        String json = """
+                [
+                  {"name": "com.example.Foo"},
+                  {"note": "no name, not a reflection entry"},
+                  "not even an object"
+                ]
+                """;
+
+        MetadataDocument doc = MetadataDocument.parse(json);
+        assertEquals(1, doc.entries().size());
+        assertEquals(2, doc.unsupportedEntryCount(),
+                "unparseable entries must be reported, not dropped silently");
+        assertThrows(IllegalStateException.class, () -> doc.serialize(doc.entries()));
+    }
+
+    @Test
+    void absentParameterTypesIsNotTheSameAsAnEmptyList() {
+        String json = """
+                [
+                  {
+                    "name": "com.example.Foo",
+                    "methods": [
+                      {"name": "everyOverload"},
+                      {"name": "noArgs", "parameterTypes": []},
+                      {"name": "oneArg", "parameterTypes": ["int"]}
+                    ]
+                  }
+                ]
+                """;
+
+        MetadataDocument doc = MetadataDocument.parse(json);
+        List<MethodConfig> methods = doc.entries().get(0).methods();
+        assertFalse(methods.get(0).parameterTypesSpecified(),
+                "a missing parameterTypes key means every overload");
+        assertTrue(methods.get(1).parameterTypesSpecified(),
+                "an explicit empty array means the zero-argument member");
+        assertTrue(methods.get(2).parameterTypesSpecified());
+
+        String serialized = doc.serialize(doc.entries());
+        assertFalse(serialized.contains("\"parameterTypes\" : [ ]\n    }, {\n      \"name\" : \"everyOverload\""),
+                "the absent form must not gain an empty array: " + serialized);
+        MetadataDocument reparsed = MetadataDocument.parse(serialized);
+        assertFalse(reparsed.entries().get(0).methods().get(0).parameterTypesSpecified(),
+                "round-tripping must preserve 'every overload'");
+        assertTrue(reparsed.entries().get(0).methods().get(1).parameterTypesSpecified());
+        assertTrue(reparsed.entries().get(0).methods().get(1).parameterTypes().isEmpty());
+    }
+
 }

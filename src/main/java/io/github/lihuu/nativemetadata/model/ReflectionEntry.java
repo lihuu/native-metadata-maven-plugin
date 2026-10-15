@@ -68,10 +68,7 @@ public record ReflectionEntry(
         if (!methods.isEmpty()) {
             List<Map<String, Object>> methodMaps = new ArrayList<>();
             for (MethodConfig method : methods) {
-                Map<String, Object> mMap = new LinkedHashMap<>(method.extra());
-                mMap.put("name", method.name());
-                mMap.put("parameterTypes", method.parameterTypes());
-                methodMaps.add(mMap);
+                methodMaps.add(methodToMap(method));
             }
             map.put("methods", methodMaps);
         }
@@ -79,15 +76,26 @@ public record ReflectionEntry(
         if (!queriedMethods.isEmpty()) {
             List<Map<String, Object>> queriedMaps = new ArrayList<>();
             for (MethodConfig method : queriedMethods) {
-                Map<String, Object> qMap = new LinkedHashMap<>(method.extra());
-                qMap.put("name", method.name());
-                qMap.put("parameterTypes", method.parameterTypes());
-                queriedMaps.add(qMap);
+                queriedMaps.add(methodToMap(method));
             }
             map.put("queriedMethods", queriedMaps);
         }
 
         map.putAll(extra);
         return map;
+    }
+
+    /**
+     * Member-level properties this model does not interpret (for example a per-field permission
+     * flag) are carried through verbatim, and {@code parameterTypes} is only written when the input
+     * actually named it, so that "every overload" does not become "the no-arg member".
+     */
+    private static Map<String, Object> methodToMap(MethodConfig method) {
+        Map<String, Object> mMap = new LinkedHashMap<>(method.extra());
+        mMap.put("name", method.name());
+        if (method.parameterTypesSpecified()) {
+            mMap.put("parameterTypes", method.parameterTypes());
+        }
+        return mMap;
     }
 }

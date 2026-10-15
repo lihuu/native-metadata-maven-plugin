@@ -24,10 +24,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # GraalVM because the plugin compiles against the Java 25 Class-File API with
-      # maven.compiler.release=25, and the action already used by ci.yml is the proven way to get a
-      # JDK 25 here. This workflow only reads the pom, but the build below needs the same toolchain
-      # ci.yml uses, or it would fail for a reason that has nothing to do with the tag.
+      # GraalVM 25 because that is the JDK the plugin itself is built with; the released classes
+      # target Java 17 (maven.compiler.release=17), which is what the plugin runs on. This workflow
+      # only reads the pom, but the build below needs the same toolchain ci.yml uses, or it would
+      # fail for a reason that has nothing to do with the tag.
       - name: Set up GraalVM JDK 25
         uses: graalvm/setup-graalvm@v1
         with:

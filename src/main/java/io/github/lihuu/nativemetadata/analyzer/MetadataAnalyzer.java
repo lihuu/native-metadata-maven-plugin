@@ -15,6 +15,7 @@ import io.github.lihuu.nativemetadata.scanner.ClasspathMetadataScanner;
 import io.github.lihuu.nativemetadata.scanner.DiscoveredMetadataSource;
 import io.github.lihuu.nativemetadata.scanner.DiscoveredRegistration;
 import io.github.lihuu.nativemetadata.scanner.MetadataScope;
+import io.github.lihuu.nativemetadata.scanner.MetadataSourceScope;
 import org.jetbrains.annotations.NotNull;
 
 import java.io.IOException;
@@ -42,6 +43,19 @@ public final class MetadataAnalyzer {
     public AnalysisReport analyze(@NotNull List<Path> ownedConfigs,
                                   @NotNull List<String> classpath,
                                   @NotNull List<Path> traceFiles) throws IOException {
+        return analyze(ownedConfigs, classpath, traceFiles, MetadataSourceScope.none());
+    }
+
+    /**
+     * @param scope where metadata may be found, and which of those locations the native build
+     *              actually consumes. Generated directories and this build's own output are read-only
+     *              inputs; only consumed sources may justify deleting a self-owned registration.
+     */
+    @NotNull
+    public AnalysisReport analyze(@NotNull List<Path> ownedConfigs,
+                                  @NotNull List<String> classpath,
+                                  @NotNull List<Path> traceFiles,
+                                  @NotNull MetadataSourceScope scope) throws IOException {
         List<ReflectionEntry> ownedEntries = new ArrayList<>();
         List<DiscoveredMetadataSource> ownedSources = new ArrayList<>();
         for (Path configPath : ownedConfigs) {
@@ -53,8 +67,9 @@ public final class MetadataAnalyzer {
                     MetadataScope.PROJECT,
                     true,
                     doc.entries().size(),
-                    0,
+                    doc.unsupportedEntryCount(),
                     null,
+                    true,
                     doc
             ));
         }
@@ -74,7 +89,7 @@ public final class MetadataAnalyzer {
         BytecodeInventory bytecodeInventory = classfileScanner.scan(classpath, targetNames);
 
         ClasspathMetadataScanner classpathScanner = new ClasspathMetadataScanner();
-        ClasspathMetadataResult classpathMetadata = classpathScanner.scan(classpath, ownedConfigs);
+        ClasspathMetadataResult classpathMetadata = classpathScanner.scan(classpath, ownedConfigs, scope);
 
         List<ClassAnalysis> classAnalyses = new ArrayList<>();
         boolean traceProvided = !traceFiles.isEmpty();
@@ -223,11 +238,15 @@ public final class MetadataAnalyzer {
                     }
                 }
                 for (MethodConfig mc : entry.methods()) {
-                    if (mc.name().equals(name)) {
-                        if (mc.parameterTypes().isEmpty() || mc.parameterTypes().equals(mi.parameterTypes())) {
-                            selected = true;
-                            break;
-                        }
+                    if (!mc.name().equals(name)) {
+                        continue;
+                    }
+                    // No parameterTypes key means every overload; an explicit empty array means the
+                    // zero-argument member only. Treating them alike over-counted the members a
+                    // broad-looking registration really grants.
+                    if (!mc.parameterTypesSpecified() || mc.parameterTypes().equals(mi.parameterTypes())) {
+                        selected = true;
+                        break;
                     }
                 }
                 if (selected) {

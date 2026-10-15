@@ -15,14 +15,17 @@ import io.github.lihuu.nativemetadata.pruner.PruningRule;
 import io.github.lihuu.nativemetadata.pruner.PruningRulesParser;
 import io.github.lihuu.nativemetadata.scanner.ClasspathMetadataScanner;
 import io.github.lihuu.nativemetadata.scanner.DiscoveredRegistration;
+import io.github.lihuu.nativemetadata.scanner.MetadataSourceScope;
 import org.apache.maven.plugin.AbstractMojo;
 import org.apache.maven.plugin.MojoExecutionException;
 import org.apache.maven.plugin.MojoFailureException;
+import org.apache.maven.plugins.annotations.Component;
 import org.apache.maven.plugins.annotations.LifecyclePhase;
 import org.apache.maven.plugins.annotations.Mojo;
 import org.apache.maven.plugins.annotations.Parameter;
 import org.apache.maven.plugins.annotations.ResolutionScope;
 import org.apache.maven.project.MavenProject;
+import org.apache.maven.rtinfo.RuntimeInformation;
 
 import java.io.File;
 import java.io.IOException;
@@ -54,6 +57,9 @@ public final class PruneMojo extends AbstractMojo {
     @Parameter(property = "native.metadata.traceFiles")
     private List<File> traceFiles;
 
+    @Parameter
+    private List<File> generatedMetadataDirectories;
+
     @Parameter(property = "native.metadata.rulesFile")
     private File rulesFile;
 
@@ -79,12 +85,27 @@ public final class PruneMojo extends AbstractMojo {
     @Parameter(property = "native.metadata.skip", defaultValue = "false")
     private boolean skip;
 
+    @Parameter(property = "native.metadata.environmentFile",
+            defaultValue = "${project.build.directory}/native-metadata/environment.json")
+    private File environmentFile;
+
+    @Component
+    private RuntimeInformation runtimeInformation;
+
     @Override
     public void execute() throws MojoExecutionException, MojoFailureException {
         if (skip) {
             getLog().info("Skipping native-metadata:prune");
             return;
         }
+
+        recordEnvironment("prune");
+
+        MetadataSourceScope scope = MetadataSourceScope.of(
+                GeneratedMetadataRoots.resolve(generatedMetadataDirectories),
+                GeneratedMetadataRoots.projectOutputRoots(project),
+                GeneratedMetadataRoots.nativeInputClasspath(project));
+        List<Path> generatedRoots = scope.generatedRoots();
 
         List<Path> resolvedOwned = resolveOwnedConfigs();
         if (resolvedOwned.isEmpty()) {
@@ -93,6 +114,7 @@ public final class PruneMojo extends AbstractMojo {
         }
 
         List<String> resolvedClasspath = resolveClasspath();
+        GeneratedMetadataRoots.appendToClasspath(generatedRoots, resolvedClasspath);
         List<Path> resolvedTraces = (traceFiles != null)
                 ? traceFiles.stream().map(File::toPath).filter(Files::isRegularFile).toList()
                 : Collections.emptyList();
@@ -100,7 +122,7 @@ public final class PruneMojo extends AbstractMojo {
         try {
             // Step 1: Run analyze to generate full report and gather external registrations
             MetadataAnalyzer analyzer = new MetadataAnalyzer();
-            AnalysisReport report = analyzer.analyze(resolvedOwned, resolvedClasspath, resolvedTraces);
+            AnalysisReport report = analyzer.analyze(resolvedOwned, resolvedClasspath, resolvedTraces, scope);
 
             if (jsonReport != null) {
                 report.writeJson(jsonReport.toPath());
@@ -132,6 +154,11 @@ public final class PruneMojo extends AbstractMojo {
                     resName = configPath.getFileName().toString();
                 }
                 MetadataDocument doc = MetadataDocument.parse(configPath);
+                if (doc.unsupportedEntryCount() > 0) {
+                    throw new MojoExecutionException("Refusing to rewrite " + configPath + ": "
+                            + doc.unsupportedEntryCount() + " reflection entr(ies) could not be parsed "
+                            + "and would be lost: " + doc.unsupportedEntryReasons());
+                }
                 originalDocs.put(resName, doc);
                 originalSourceFiles.put(resName, configPath);
                 for (ReflectionEntry entry : doc.entries()) {
@@ -139,9 +166,23 @@ public final class PruneMojo extends AbstractMojo {
                 }
             }
 
+            // Only registrations the native build actually reads may justify removing the project's
+            // own entry. A provided or compile-only dependency is on the Maven compile classpath but
+            // never in the image, so "something else already registers this" would be untrue.
             List<DiscoveredRegistration> externalRegs = new ArrayList<>();
+            int skippedNotConsumed = 0;
             for (ClassAnalysis ca : report.classes()) {
-                externalRegs.addAll(ca.alsoRegisteredBy());
+                for (DiscoveredRegistration registration : ca.alsoRegisteredBy()) {
+                    if (registration.source().consumedByNativeBuild()) {
+                        externalRegs.add(registration);
+                    } else {
+                        skippedNotConsumed++;
+                    }
+                }
+            }
+            if (skippedNotConsumed > 0) {
+                getLog().info("Ignoring " + skippedNotConsumed
+                        + " registration(s) from sources the native build does not consume");
             }
 
             // Step 4: Execute pruning engine
@@ -169,6 +210,21 @@ public final class PruneMojo extends AbstractMojo {
                     + (dryRun ? "dry-run" : "applied to " + targetOutputDir) + ")");
         } catch (Exception e) {
             throw new MojoExecutionException("Failed to prune native image metadata: " + e.getMessage(), e);
+        }
+    }
+
+    private void recordEnvironment(String goalName) {
+        if (environmentFile == null) {
+            return;
+        }
+        String mavenVersion = (runtimeInformation != null) ? runtimeInformation.getMavenVersion() : "unknown";
+        try {
+            NativeMetadataEnvironment.write(environmentFile.toPath(), goalName, mavenVersion);
+            getLog().info("native-metadata " + goalName + " is running on Java "
+                    + Runtime.version().feature() + " (" + System.getProperty("java.home") + "), Maven "
+                    + mavenVersion);
+        } catch (IOException e) {
+            getLog().warn("Could not write the environment record to " + environmentFile + ": " + e.getMessage());
         }
     }
 

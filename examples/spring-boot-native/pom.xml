@@ -1,0 +1,174 @@
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-starter-parent</artifactId>
+        <version>3.5.16</version>
+        <relativePath/>
+    </parent>
+
+    <groupId>com.example.boot</groupId>
+    <artifactId>spring-boot-native-sample</artifactId>
+    <version>1.0.0</version>
+    <packaging>jar</packaging>
+
+    <name>spring-boot-native sample</name>
+    <description>
+        Standalone Spring Boot 3.5.16 Web application used to verify that Spring AOT generated
+        reflection metadata is discovered as a read-only source, that pruning produces an
+        explainable change, and that the native image behaves like the baseline over real HTTP.
+    </description>
+
+    <properties>
+        <java.version>17</java.version>
+        <!-- Version of the plugin under test; override with -Dnative.metadata.version=<candidate>. -->
+        <native.metadata.version>1.1.0</native.metadata.version>
+        <!-- Ranges asserted inside the Maven JVM by the enforcer execution below. -->
+        <required.java.version>[17,)</required.java.version>
+        <required.maven.version>[3.9.9,)</required.maven.version>
+        <native.buildtools.version>0.10.6</native.buildtools.version>
+    </properties>
+
+    <dependencies>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-web</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-actuator</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+            <!--
+              Spring's AOT goal runs at prepare-package, like the plugin below. The build log is what
+              proves the order; nothing here relies on "the plugin happens to be listed second".
+            -->
+            <plugin>
+                <groupId>org.springframework.boot</groupId>
+                <artifactId>spring-boot-maven-plugin</artifactId>
+                <executions>
+                    <execution>
+                        <id>process-aot</id>
+                        <goals>
+                            <goal>process-aot</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
+            <!--
+              The plugin runs at prepare-package, after spring-boot:process-aot has produced
+              target/spring-aot/main/resources. The generatedMetadataDirectories parameter points at
+              that directory so the AOT output is read as a read-only source and can justify
+              removing a self-owned duplicate - never the other way round.
+            -->
+            <plugin>
+                <groupId>io.github.lihuu</groupId>
+                <artifactId>native-metadata-maven-plugin</artifactId>
+                <version>${native.metadata.version}</version>
+                <executions>
+                    <execution>
+                        <id>analyze-native-metadata</id>
+                        <phase>prepare-package</phase>
+                        <goals>
+                            <goal>analyze</goal>
+                        </goals>
+                        <configuration>
+                            <generatedMetadataDirectories>
+                                <directory>${project.build.directory}/spring-aot/main/resources</directory>
+                            </generatedMetadataDirectories>
+                        </configuration>
+                    </execution>
+                    <execution>
+                        <id>prune-native-metadata</id>
+                        <phase>prepare-package</phase>
+                        <goals>
+                            <goal>prune</goal>
+                        </goals>
+                        <configuration>
+                            <generatedMetadataDirectories>
+                                <directory>${project.build.directory}/spring-aot/main/resources</directory>
+                            </generatedMetadataDirectories>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-enforcer-plugin</artifactId>
+                <executions>
+                    <execution>
+                        <id>assert-runtime</id>
+                        <goals>
+                            <goal>enforce</goal>
+                        </goals>
+                        <configuration>
+                            <rules>
+                                <requireJavaVersion>
+                                    <version>${required.java.version}</version>
+                                </requireJavaVersion>
+                                <requireMavenVersion>
+                                    <version>${required.maven.version}</version>
+                                </requireMavenVersion>
+                            </rules>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+        </plugins>
+    </build>
+
+    <profiles>
+        <profile>
+            <id>native</id>
+            <build>
+                <plugins>
+                    <!--
+                      native-maven-plugin 0.10.6 as required by the spec. The parent's native profile
+                      only manages configuration, so the plugin has to be declared here to actually
+                      run. requiredVersion is set to the oldest toolchain this sample is verified with
+                      instead of the parent's 22.3, because the GraalVM distributions used here report
+                      their JDK-based version (for example native-image 17.0.9) rather than 22.3.
+                    -->
+                    <plugin>
+                        <groupId>org.graalvm.buildtools</groupId>
+                        <artifactId>native-maven-plugin</artifactId>
+                        <version>${native.buildtools.version}</version>
+                        <extensions>true</extensions>
+                        <executions>
+                            <execution>
+                                <id>build-native</id>
+                                <goals>
+                                    <goal>compile-no-fork</goal>
+                                </goals>
+                                <phase>package</phase>
+                            </execution>
+                        </executions>
+                        <configuration>
+                            <imageName>spring-boot-native-sample</imageName>
+                            <fallback>false</fallback>
+                            <requiredVersion>17.0</requiredVersion>
+                        </configuration>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+        <!-- A: baseline. No pruning, the native image is built from the untouched configuration. -->
+        <profile>
+            <id>baseline</id>
+            <properties>
+                <native.metadata.skip>true</native.metadata.skip>
+            </properties>
+        </profile>
+    </profiles>
+</project>

@@ -1,4 +1,5 @@
 package io.github.lihuu.nativemetadata.pruner;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import io.github.lihuu.nativemetadata.model.MethodConfig;
 import io.github.lihuu.nativemetadata.model.ReflectionEntry;
@@ -30,6 +31,7 @@ class PruningEngineTest {
                 1,
                 0,
                 null,
+                true,
                 null
         );
     }
@@ -444,4 +446,67 @@ class PruningEngineTest {
                         entry(TYPE).allDeclaredConstructors().build(), false)
         ));
     }
+
+    @Test
+    void memberLevelPropertiesMustMatchExactlyForCoverage() {
+        // Field- and method-level properties this model does not interpret are carried through
+        // verbatim; a covering entry that does not ask for the same thing must not be treated as
+        // granting it.
+        MethodConfig withProperty = new MethodConfig("greet", List.of(), Map.of("allowWrite", true));
+        MethodConfig withoutProperty = new MethodConfig("greet", List.of());
+
+        assertCoverage(List.of(
+                new CoverageCase("covering entry without a member property does not cover one that has it",
+                        entry(TYPE).methods(withProperty).build(),
+                        entry(TYPE).methods(withoutProperty).build(), false),
+                new CoverageCase("identical member properties cover",
+                        entry(TYPE).methods(withProperty).build(),
+                        entry(TYPE).methods(withProperty).build(), true)
+        ));
+    }
+
+    @Test
+    void everyOverloadAndAnExplicitZeroArgMemberAreDifferentPermissions() {
+        MethodConfig everyOverload = MethodConfig.everyOverload("greet");
+        MethodConfig noArgs = new MethodConfig("greet", List.of());
+        MethodConfig oneArg = new MethodConfig("greet", List.of("java.lang.String"));
+
+        assertCoverage(List.of(
+                new CoverageCase("an explicit no-arg member does not cover every overload",
+                        entry(TYPE).methods(everyOverload).build(),
+                        entry(TYPE).methods(noArgs).build(), false),
+                new CoverageCase("every overload covers an explicit no-arg member",
+                        entry(TYPE).methods(noArgs).build(),
+                        entry(TYPE).methods(everyOverload).build(), true),
+                new CoverageCase("every overload covers every overload",
+                        entry(TYPE).methods(everyOverload).build(),
+                        entry(TYPE).methods(everyOverload).build(), true),
+                new CoverageCase("a different signature does not cover the no-arg member",
+                        entry(TYPE).methods(noArgs).build(),
+                        entry(TYPE).methods(oneArg).build(), false)
+        ));
+    }
+
+    @Test
+    void pruningRuleCannotAttachOrDropACondition() {
+        Map<String, Object> condition = Map.of("typeReachable", "com.example.Bar");
+        ReflectionEntry unconditional = entry(TYPE).build();
+        ReflectionEntry conditional = entry(TYPE).condition(condition).build();
+
+        List<OwnedConfigEntry> owned = List.of(new OwnedConfigEntry(RESOURCE, unconditional));
+        PruningEngine engine = new PruningEngine();
+
+        // The rule names no condition, so it may only match unconditional entries; a replacement that
+        // adds one silently changes when the entry applies.
+        PruningRule attachesCondition = new PruningRule(RESOURCE, TYPE, null, conditional);
+        assertThrows(IllegalStateException.class,
+                () -> engine.prune(owned, List.of(), List.of(attachesCondition)));
+
+        // And the other direction: dropping a condition from a conditional entry.
+        List<OwnedConfigEntry> conditionalOwned = List.of(new OwnedConfigEntry(RESOURCE, conditional));
+        PruningRule dropsCondition = new PruningRule(RESOURCE, TYPE, condition, unconditional);
+        assertThrows(IllegalStateException.class,
+                () -> engine.prune(conditionalOwned, List.of(), List.of(dropsCondition)));
+    }
+
 }

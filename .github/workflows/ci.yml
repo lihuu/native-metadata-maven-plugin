@@ -6,19 +6,491 @@ on:
   pull_request:
     branches: [ main ]
 
-jobs:
-  test:
-    runs-on: macos-latest
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+permissions:
+  contents: read
 
-      - name: Set up GraalVM JDK 25
+env:
+  MAVEN_ARGS: "-B -ntp"
+
+jobs:
+  # ---------------------------------------------------------------------------------------------
+  # B25: build the plugin with GraalVM 25 (Java 25), run the unit tests and the non-native
+  # integration test, and publish the single artifact every later job consumes.
+  # ---------------------------------------------------------------------------------------------
+  build:
+    name: build (GraalVM 25, Maven 3.9.9)
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install pinned toolchain
+        run: |
+          toolchain_env="$(scripts/ci-install-toolchain.sh --graalvm graalvm-ce-jdk25-linux --maven maven-3.9.9 --dest "$RUNNER_TEMP/toolchains")"
+          eval "$toolchain_env"
+          echo "JAVA_HOME=$JAVA_HOME" >> "$GITHUB_ENV"
+          echo "MAVEN_HOME=$MAVEN_HOME" >> "$GITHUB_ENV"
+          echo "$MAVEN_HOME/bin" >> "$GITHUB_PATH"
+
+      - name: Cache Maven repository
+        uses: actions/cache@v4
+        with:
+          path: ~/.m2/repository
+          key: m2-build-${{ hashFiles('pom.xml') }}
+
+      - name: Build high-version class-file fixtures
+        run: scripts/build-high-version-fixtures.sh --java-home "$JAVA_HOME" --output "$RUNNER_TEMP/high-version-fixtures"
+
+      - name: mvn verify
+        run: mvn -B -ntp clean verify -Dnative.metadata.test.highVersionFixtures="$RUNNER_TEMP/high-version-fixtures"
+
+      - name: Record plugin artifact hash
+        run: |
+          mkdir -p target/staged-plugin
+          cp target/native-metadata-maven-plugin-*.jar pom.xml target/staged-plugin/
+          shasum -a 256 target/staged-plugin/*.jar | tee target/staged-plugin/plugin-sha256.txt
+          unzip -p target/staged-plugin/*.jar META-INF/MANIFEST.MF
+
+      - name: Upload plugin artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: plugin-artifact
+          path: target/staged-plugin/
+          if-no-files-found: error
+
+      - name: Upload high-version fixtures
+        uses: actions/upload-artifact@v4
+        with:
+          name: high-version-fixtures
+          path: ${{ runner.temp }}/high-version-fixtures
+          if-no-files-found: error
+
+      - name: Upload build logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: logs-build
+          path: |
+            target/it/**
+            target/compat/**
+          if-no-files-found: ignore
+
+  # ---------------------------------------------------------------------------------------------
+  # U17 / U21: compile and run the core unit tests on the older Maven JVMs. These jobs download the
+  # fixtures produced by the build job; they do not compile the high-version input themselves.
+  # ---------------------------------------------------------------------------------------------
+  unit-core:
+    name: unit tests (GraalVM ${{ matrix.java }})
+    needs: build
+    runs-on: ubuntu-22.04
+    strategy:
+      fail-fast: false
+      matrix:
+        java: [ '17', '21' ]
+        include:
+          - java: '17'
+            toolchain: graalvm-ce-jdk17-linux
+          - java: '21'
+            toolchain: graalvm-ce-jdk21-linux
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install pinned toolchain
+        run: |
+          toolchain_env="$(scripts/ci-install-toolchain.sh --graalvm ${{ matrix.toolchain }} --maven maven-3.9.9 --dest "$RUNNER_TEMP/toolchains")"
+          eval "$toolchain_env"
+          echo "JAVA_HOME=$JAVA_HOME" >> "$GITHUB_ENV"
+          echo "MAVEN_HOME=$MAVEN_HOME" >> "$GITHUB_ENV"
+
+      - name: Download high-version fixtures
+        uses: actions/download-artifact@v4
+        with:
+          name: high-version-fixtures
+          path: ${{ runner.temp }}/high-version-fixtures
+
+      - name: Cache Maven repository
+        uses: actions/cache@v4
+        with:
+          path: ~/.m2/repository
+          key: m2-unit-${{ matrix.java }}-${{ hashFiles('pom.xml') }}
+
+      - name: mvn test
+        run: |
+          "$MAVEN_HOME/bin/mvn" -B -ntp clean test \
+            -Dnative.metadata.test.highVersionFixtures="$RUNNER_TEMP/high-version-fixtures"
+
+  # ---------------------------------------------------------------------------------------------
+  # R17 / R21 / R25 x Maven 3.9.9 / 3.10.0: six real consumption runs against the *same* artifact
+  # built by the build job, each in its own isolated repository.
+  # ---------------------------------------------------------------------------------------------
+  consume:
+    name: consume (${{ matrix.toolchain }}, Maven ${{ matrix.maven }})
+    needs: build
+    runs-on: ubuntu-22.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - toolchain: graalvm-ce-jdk17-linux
+            maven: maven-3.9.9
+            javaRange: '[17,18)'
+            mavenRange: '[3.9.9,3.9.10)'
+          - toolchain: graalvm-ce-jdk17-linux
+            maven: maven-3.10.0
+            javaRange: '[17,18)'
+            mavenRange: '[3.10.0,3.10.1)'
+          - toolchain: graalvm-ce-jdk21-linux
+            maven: maven-3.9.9
+            javaRange: '[21,22)'
+            mavenRange: '[3.9.9,3.9.10)'
+          - toolchain: graalvm-ce-jdk21-linux
+            maven: maven-3.10.0
+            javaRange: '[21,22)'
+            mavenRange: '[3.10.0,3.10.1)'
+          - toolchain: graalvm-ce-jdk25-linux
+            maven: maven-3.9.9
+            javaRange: '[25,26)'
+            mavenRange: '[3.9.9,3.9.10)'
+          - toolchain: graalvm-ce-jdk25-linux
+            maven: maven-3.10.0
+            javaRange: '[25,26)'
+            mavenRange: '[3.10.0,3.10.1)'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install pinned toolchain
+        run: |
+          toolchain_env="$(scripts/ci-install-toolchain.sh --graalvm ${{ matrix.toolchain }} --maven maven-3.9.9 --dest "$RUNNER_TEMP/toolchains")"
+          eval "$toolchain_env"
+          echo "JAVA_HOME=$JAVA_HOME" >> "$GITHUB_ENV"
+          if [ "${{ matrix.maven }}" = "maven-3.10.0" ]; then
+            toolchain_env="$(scripts/ci-install-toolchain.sh --maven maven-3.10.0 --dest "$RUNNER_TEMP/toolchains")"
+            eval "$toolchain_env"
+          fi
+          echo "MAVEN_HOME=$MAVEN_HOME" >> "$GITHUB_ENV"
+
+      - name: Download plugin artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: plugin-artifact
+          path: staged
+
+      - name: Consume the staged artifact
+        run: |
+          scripts/verify-compatibility.sh \
+            --artifact staged/native-metadata-maven-plugin-*.jar \
+            --pom staged/pom.xml \
+            --maven-home "$MAVEN_HOME" \
+            --java-home "$JAVA_HOME" \
+            --case "consume-${{ matrix.toolchain }}-${{ matrix.maven }}" \
+            --required-java "${{ matrix.javaRange }}" \
+            --required-maven "${{ matrix.mavenRange }}" \
+            --expect-sha256 "$(awk '{print $1}' staged/plugin-sha256.txt)" \
+            --evidence target/compat --timeout 600
+
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: evidence-consume-${{ matrix.toolchain }}-${{ matrix.maven }}
+          path: target/compat
+          if-no-files-found: ignore
+
+  # ---------------------------------------------------------------------------------------------
+  # O17: a plain OpenJDK 17 JVM, analysis and pruning only. Proves the plugin does not need
+  # GraalVM-private APIs. It is explicitly not a native build.
+  # ---------------------------------------------------------------------------------------------
+  plain-openjdk-17:
+    name: plain OpenJDK 17 (analysis/pruning only)
+    needs: build
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install pinned toolchain
+        run: |
+          toolchain_env="$(scripts/ci-install-toolchain.sh --plain-jdk17 temurin-17-linux --maven maven-3.9.9 --dest "$RUNNER_TEMP/toolchains")"
+          eval "$toolchain_env"
+          echo "JAVA_HOME=$PLAIN_JAVA_HOME" >> "$GITHUB_ENV"
+          echo "MAVEN_HOME=$MAVEN_HOME" >> "$GITHUB_ENV"
+
+      - name: Download plugin artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: plugin-artifact
+          path: staged
+
+      - name: Consume with plain OpenJDK 17
+        run: |
+          scripts/verify-compatibility.sh \
+            --artifact staged/native-metadata-maven-plugin-*.jar \
+            --pom staged/pom.xml \
+            --maven-home "$MAVEN_HOME" \
+            --java-home "$JAVA_HOME" \
+            --case "consume-plain-openjdk-17" \
+            --required-java "[17,18)" --required-maven "[3.9.9,3.9.10)" \
+            --expect-sha256 "$(awk '{print $1}' staged/plugin-sha256.txt)" \
+            --evidence target/compat
+
+      - name: Assert the JVM was not GraalVM
+        run: |
+          python3 - <<'PY'
+          import json
+          data = json.load(open("target/compat/consume-plain-openjdk-17/environment.json"))
+          vendor = data["javaVendor"]
+          assert "GraalVM" not in vendor, vendor
+          print("vendor:", vendor)
+          PY
+
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: evidence-consume-plain-openjdk-17
+          path: target/compat
+          if-no-files-found: ignore
+
+  # ---------------------------------------------------------------------------------------------
+  # MR: multi-release JAR selection on each supported Maven JVM. The result is allowed to differ
+  # per JVM; what is asserted is that it follows the running version.
+  # ---------------------------------------------------------------------------------------------
+  multi-release:
+    name: MR-JAR selection (GraalVM ${{ matrix.java }})
+    needs: build
+    runs-on: ubuntu-22.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - java: '17'
+            toolchain: graalvm-ce-jdk17-linux
+          - java: '21'
+            toolchain: graalvm-ce-jdk21-linux
+          - java: '25'
+            toolchain: graalvm-ce-jdk25-linux
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install pinned toolchain
+        run: |
+          toolchain_env="$(scripts/ci-install-toolchain.sh --graalvm ${{ matrix.toolchain }} --maven maven-3.9.9 --dest "$RUNNER_TEMP/toolchains")"
+          eval "$toolchain_env"
+          echo "JAVA_HOME=$JAVA_HOME" >> "$GITHUB_ENV"
+          echo "MAVEN_HOME=$MAVEN_HOME" >> "$GITHUB_ENV"
+
+      - name: MR-JAR test
+        run: ${MAVEN_HOME}/bin/mvn -B -ntp test -Dtest=MrJarMetadataSelectionTest
+
+  # ---------------------------------------------------------------------------------------------
+  # N17 / N25: plain native A/B/C. Required: a missing native-image fails the job instead of
+  # turning into a skip.
+  # ---------------------------------------------------------------------------------------------
+  native-plain:
+    name: native plain A/B/C (GraalVM ${{ matrix.java }})
+    needs: build
+    runs-on: ubuntu-22.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - java: '17'
+            toolchain: graalvm-ce-jdk17-linux
+          - java: '25'
+            toolchain: graalvm-ce-jdk25-linux
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install pinned toolchain
+        run: |
+          toolchain_env="$(scripts/ci-install-toolchain.sh --graalvm ${{ matrix.toolchain }} --maven maven-3.9.9 --dest "$RUNNER_TEMP/toolchains")"
+          eval "$toolchain_env"
+          echo "JAVA_HOME=$JAVA_HOME" >> "$GITHUB_ENV"
+          echo "MAVEN_HOME=$MAVEN_HOME" >> "$GITHUB_ENV"
+
+      - name: Cache Maven repository
+        uses: actions/cache@v4
+        with:
+          path: ~/.m2/repository
+          key: m2-native-${{ matrix.java }}-${{ hashFiles('pom.xml') }}
+
+      - name: Download the build job's plugin
+        uses: actions/download-artifact@v4
+        with:
+          name: plugin-artifact
+          path: staged
+
+      - name: Stage the exact artifact and run independent A/B/C
+        run: |
+          "$MAVEN_HOME/bin/mvn" -B -ntp -f staged/pom.xml \
+            -Dmaven.repo.local="$RUNNER_TEMP/consumer-repo" \
+            org.apache.maven.plugins:maven-install-plugin:3.1.2:install-file \
+            -Dfile="$PWD/$(find staged -maxdepth 1 -name '*.jar')" \
+            -DpomFile="$PWD/staged/pom.xml"
+          cp -R examples/plain-native "$RUNNER_TEMP/plain-native"
+          export MAVEN_ARGS="-Dbusiness.release=${{ matrix.java }}"
+          "$RUNNER_TEMP/plain-native/verify.sh" \
+            --java-home "$JAVA_HOME" --maven-home "$MAVEN_HOME" \
+            --plugin-version "$(sed -n 's:.*<version>\([^<]*\)</version>.*:\1:p' staged/pom.xml | head -1)" \
+            --repo "$RUNNER_TEMP/consumer-repo" \
+            --expect-plugin-sha256 "$(awk '{print $1}' staged/plugin-sha256.txt)" \
+            --evidence "$PWD/target/compat/plain-native"
+
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: evidence-native-plain-${{ matrix.java }}
+          path: target/compat
+          if-no-files-found: ignore
+
+  # ---------------------------------------------------------------------------------------------
+  # S17 / S21: Spring Boot 3.5.16 AOT + native + HTTP equivalence.
+  # ---------------------------------------------------------------------------------------------
+  native-spring:
+    name: native Spring AOT A/B/C (GraalVM ${{ matrix.java }})
+    needs: build
+    runs-on: ubuntu-22.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - java: '17'
+            toolchain: graalvm-ce-jdk17-linux
+          - java: '21'
+            toolchain: graalvm-ce-jdk21-linux
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install pinned toolchain
+        run: |
+          toolchain_env="$(scripts/ci-install-toolchain.sh --graalvm ${{ matrix.toolchain }} --maven maven-3.9.9 --dest "$RUNNER_TEMP/toolchains")"
+          eval "$toolchain_env"
+          echo "JAVA_HOME=$JAVA_HOME" >> "$GITHUB_ENV"
+          echo "MAVEN_HOME=$MAVEN_HOME" >> "$GITHUB_ENV"
+
+      - name: Cache Maven repository
+        uses: actions/cache@v4
+        with:
+          path: ~/.m2/repository
+          key: m2-spring-native-${{ matrix.java }}-${{ hashFiles('pom.xml') }}
+
+      - name: Download the build job's plugin
+        uses: actions/download-artifact@v4
+        with:
+          name: plugin-artifact
+          path: staged
+
+      - name: Stage the exact artifact and run independent A/B/C
+        run: |
+          "$MAVEN_HOME/bin/mvn" -B -ntp -f staged/pom.xml \
+            -Dmaven.repo.local="$RUNNER_TEMP/consumer-repo" \
+            org.apache.maven.plugins:maven-install-plugin:3.1.2:install-file \
+            -Dfile="$PWD/$(find staged -maxdepth 1 -name '*.jar')" \
+            -DpomFile="$PWD/staged/pom.xml"
+          cp -R examples/spring-boot-native "$RUNNER_TEMP/spring-boot-native"
+          "$RUNNER_TEMP/spring-boot-native/verify.sh" \
+            --java-home "$JAVA_HOME" --maven-home "$MAVEN_HOME" \
+            --plugin-version "$(sed -n 's:.*<version>\([^<]*\)</version>.*:\1:p' staged/pom.xml | head -1)" \
+            --repo "$RUNNER_TEMP/consumer-repo" \
+            --expect-plugin-sha256 "$(awk '{print $1}' staged/plugin-sha256.txt)" \
+            --evidence "$PWD/target/compat/spring-boot-native"
+
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: evidence-native-spring-${{ matrix.java }}
+          path: target/compat
+          if-no-files-found: ignore
+
+  # ---------------------------------------------------------------------------------------------
+  # Local development platform smoke test: macOS, GraalVM 21, both goals on a copied sample.
+  # ---------------------------------------------------------------------------------------------
+  macos-smoke:
+    name: macOS smoke (GraalVM 21)
+    needs: build
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up GraalVM 21
         uses: graalvm/setup-graalvm@v1
         with:
-          java-version: '25'
+          java-version: '21.0.2'
           distribution: 'graalvm-community'
           github-token: ${{ secrets.GITHUB_TOKEN }}
+          cache: 'maven'
 
-      - name: Build and Test
-        run: mvn clean test
+      - name: Install pinned Maven
+        run: |
+          toolchain_env="$(scripts/ci-install-toolchain.sh --maven maven-3.9.9 --dest "$RUNNER_TEMP/toolchains")"
+          eval "$toolchain_env"
+          echo "MAVEN_HOME=$MAVEN_HOME" >> "$GITHUB_ENV"
+
+      - name: Download plugin artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: plugin-artifact
+          path: staged
+
+      - name: Consume the Java 25 build job's artifact
+        run: |
+          scripts/verify-compatibility.sh \
+            --artifact staged/native-metadata-maven-plugin-*.jar \
+            --pom staged/pom.xml --maven-home "$MAVEN_HOME" \
+            --java-home "$JAVA_HOME" --case "macos-smoke-graalvm-21" \
+            --required-java "[21,22)" --required-maven "[3.9.9,3.9.10)" \
+            --expect-sha256 "$(awk '{print $1}' staged/plugin-sha256.txt)" \
+            --evidence target/compat
+
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: evidence-macos-smoke
+          path: target/compat
+          if-no-files-found: ignore
+
+  # ---------------------------------------------------------------------------------------------
+  # Acceptance summary. Every job above is required; this one fails if any of them did, so a
+  # missing or skipped required job cannot be mistaken for a pass.
+  # ---------------------------------------------------------------------------------------------
+  acceptance-summary:
+    name: acceptance summary
+    if: always()
+    needs: [build, unit-core, consume, plain-openjdk-17, multi-release, native-plain, native-spring, macos-smoke]
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Summarise
+        run: |
+          {
+            echo "| job | result |"
+            echo "| --- | --- |"
+            echo "| build (B25) | ${{ needs.build.result }} |"
+            echo "| unit-core (U17/U21) | ${{ needs.unit-core.result }} |"
+            echo "| consume (R17/R21/R25 x Maven) | ${{ needs.consume.result }} |"
+            echo "| plain-openjdk-17 (O17) | ${{ needs.plain-openjdk-17.result }} |"
+            echo "| multi-release (MR) | ${{ needs.multi-release.result }} |"
+            echo "| native-plain (N17/N25) | ${{ needs.native-plain.result }} |"
+            echo "| native-spring (S17/S21) | ${{ needs.native-spring.result }} |"
+            echo "| macos-smoke (MAC) | ${{ needs.macos-smoke.result }} |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Fail if any required job did not succeed
+        run: |
+          failed=""
+          for result in \
+            "${{ needs.build.result }}" \
+            "${{ needs.unit-core.result }}" \
+            "${{ needs.consume.result }}" \
+            "${{ needs.plain-openjdk-17.result }}" \
+            "${{ needs.multi-release.result }}" \
+            "${{ needs.native-plain.result }}" \
+            "${{ needs.native-spring.result }}" \
+            "${{ needs.macos-smoke.result }}"; do
+            if [ "$result" != "success" ]; then failed="$failed $result"; fi
+          done
+          if [ -n "$failed" ]; then
+            echo "Required jobs did not succeed:$failed"
+            exit 1
+          fi
+          echo "All required jobs succeeded."

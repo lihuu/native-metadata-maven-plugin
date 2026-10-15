@@ -4,14 +4,17 @@ import io.github.lihuu.nativemetadata.analyzer.AnalysisReport;
 import io.github.lihuu.nativemetadata.analyzer.MarkdownReportFormatter;
 import io.github.lihuu.nativemetadata.analyzer.MetadataAnalyzer;
 import io.github.lihuu.nativemetadata.scanner.ClasspathMetadataScanner;
+import io.github.lihuu.nativemetadata.scanner.MetadataSourceScope;
 import org.apache.maven.plugin.AbstractMojo;
 import org.apache.maven.plugin.MojoExecutionException;
 import org.apache.maven.plugin.MojoFailureException;
 import org.apache.maven.plugins.annotations.LifecyclePhase;
+import org.apache.maven.plugins.annotations.Component;
 import org.apache.maven.plugins.annotations.Mojo;
 import org.apache.maven.plugins.annotations.Parameter;
 import org.apache.maven.plugins.annotations.ResolutionScope;
 import org.apache.maven.project.MavenProject;
+import org.apache.maven.rtinfo.RuntimeInformation;
 
 import java.io.File;
 import java.io.IOException;
@@ -41,6 +44,9 @@ public final class AnalyzeMojo extends AbstractMojo {
     @Parameter(property = "native.metadata.traceFiles")
     private List<File> traceFiles;
 
+    @Parameter
+    private List<File> generatedMetadataDirectories;
+
     @Parameter(property = "native.metadata.jsonReport",
             defaultValue = "${project.build.directory}/native-metadata/report.json")
     private File jsonReport;
@@ -52,12 +58,27 @@ public final class AnalyzeMojo extends AbstractMojo {
     @Parameter(property = "native.metadata.skip", defaultValue = "false")
     private boolean skip;
 
+    @Parameter(property = "native.metadata.environmentFile",
+            defaultValue = "${project.build.directory}/native-metadata/environment.json")
+    private File environmentFile;
+
+    @Component
+    private RuntimeInformation runtimeInformation;
+
     @Override
     public void execute() throws MojoExecutionException, MojoFailureException {
         if (skip) {
             getLog().info("Skipping native-metadata:analyze");
             return;
         }
+
+        recordEnvironment("analyze");
+
+        MetadataSourceScope scope = MetadataSourceScope.of(
+                GeneratedMetadataRoots.resolve(generatedMetadataDirectories),
+                GeneratedMetadataRoots.projectOutputRoots(project),
+                GeneratedMetadataRoots.nativeInputClasspath(project));
+        List<Path> generatedRoots = scope.generatedRoots();
 
         List<Path> resolvedOwned = resolveOwnedConfigs();
         if (resolvedOwned.isEmpty()) {
@@ -66,13 +87,14 @@ public final class AnalyzeMojo extends AbstractMojo {
         }
 
         List<String> resolvedClasspath = resolveClasspath();
+        GeneratedMetadataRoots.appendToClasspath(generatedRoots, resolvedClasspath);
         List<Path> resolvedTraces = (traceFiles != null)
                 ? traceFiles.stream().map(File::toPath).filter(Files::isRegularFile).toList()
                 : Collections.emptyList();
 
         try {
             MetadataAnalyzer analyzer = new MetadataAnalyzer();
-            AnalysisReport report = analyzer.analyze(resolvedOwned, resolvedClasspath, resolvedTraces);
+            AnalysisReport report = analyzer.analyze(resolvedOwned, resolvedClasspath, resolvedTraces, scope);
 
             if (jsonReport != null) {
                 report.writeJson(jsonReport.toPath());
@@ -88,6 +110,21 @@ public final class AnalyzeMojo extends AbstractMojo {
                     + report.summary().protectedOverlaps() + " protected overlaps.");
         } catch (Exception e) {
             throw new MojoExecutionException("Failed to analyze native image metadata: " + e.getMessage(), e);
+        }
+    }
+
+    private void recordEnvironment(String goalName) {
+        if (environmentFile == null) {
+            return;
+        }
+        String mavenVersion = (runtimeInformation != null) ? runtimeInformation.getMavenVersion() : "unknown";
+        try {
+            NativeMetadataEnvironment.write(environmentFile.toPath(), goalName, mavenVersion);
+            getLog().info("native-metadata " + goalName + " is running on Java "
+                    + Runtime.version().feature() + " (" + System.getProperty("java.home") + "), Maven "
+                    + mavenVersion);
+        } catch (IOException e) {
+            getLog().warn("Could not write the environment record to " + environmentFile + ": " + e.getMessage());
         }
     }
 

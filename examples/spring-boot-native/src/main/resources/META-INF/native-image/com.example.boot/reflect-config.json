@@ -1,0 +1,9 @@
+[
+  {
+    "name": "com.example.boot.DynamicTarget",
+    "methods": [
+      { "name": "<init>", "parameterTypes": [] },
+      { "name": "describe", "parameterTypes": ["java.lang.String"] }
+    ]
+  }
+]

@@ -1,10 +1,9 @@
 package io.github.lihuu.nativemetadata.analyzer;
 
+import io.github.lihuu.nativemetadata.support.JavaFixtureCompiler;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
-import javax.tools.JavaCompiler;
-import javax.tools.ToolProvider;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -43,12 +42,7 @@ class MetadataAnalyzerTest {
         Path classesDir = tempDir.resolve("classes");
         Files.createDirectories(classesDir);
 
-        JavaCompiler compiler = ToolProvider.getSystemJavaCompiler();
-        int exitCode = compiler.run(null, null, null,
-                "--release", "25",
-                "-d", classesDir.toString(),
-                sourceFile.toString());
-        assertEquals(0, exitCode);
+        JavaFixtureCompiler.compile(classesDir, List.of(sourceFile));
 
         // Dependency jar that also registers Message
         Path vendorJar = tempDir.resolve("vendor.jar");
