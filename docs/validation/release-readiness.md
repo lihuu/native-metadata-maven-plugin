@@ -19,7 +19,7 @@ CI 触发策略：`main` 的保护规则要求 PR 且要求 `acceptance summary`
 
 后续交付门禁：
 
-- [ ] IDEA Maven Runner / Project SDK 手动演练，见 [idea-walkthrough.md](idea-walkthrough.md)。
+- **waived**（2026-10-15，维护者决定）：IDEA Maven Runner / Project SDK 手动演练 —— 不再作为待办；理由见 [idea-walkthrough.md](idea-walkthrough.md)。
 - [x] 候选实现已提交并记录 source candidate commit；源码/POM 与已验证产物清单一致。
 - [x] 运行远程 CI，确认 Linux 与 macOS jobs 的实际结果和上传证据：run `38684961127`，19/19 绿，
       Linux（六个消费组合、O17、MR、N17/N25、S17/S21）与 macOS 冒烟的 evidence artifact 均已上传。

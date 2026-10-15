@@ -1,8 +1,20 @@
-# IDEA 手动演练（NOT_RUN）
+# IDEA 手动演练（WAIVED）
 
-本机的 `/Applications`、`~/Applications`、JetBrains Toolbox apps 目录未找到 IntelliJ
-IDEA，当前工具也不提供桌面 UI 操作。因此这里只提供步骤，不能把终端测试记作 IDEA 验证。
-该未完成项属于 AC-12；java-pi 实际项目试用已单独通过。
+**状态：维护者决定 waive（2026-10-15）。本项不再有待办动作；下面的步骤保留，供日后需要时执行。**
+
+理由，按重要性排序：
+
+1. 本插件**没有 IDE 集成**：它不是 IDEA 插件，也不调用任何 IDE API，只通过 Maven 坐标被消费。
+   因此这一子项防护的是 IDE 自身的 Maven 管道，而不是插件的代码路径。
+2. 它真正要防的机制风险是“**执行 Maven 的 JVM ≠ 构建产物的 JVM**”。该机制已由 CI 的
+   `plain OpenJDK 17` job（用 JDK 17 的 Maven 消费 JDK 25 构建的产物）与 detached-consumer 套件覆盖。
+3. 执行条件在本机不成立：没有屏幕录制与辅助功能授权（`screencapture` 报 could not create image from
+   display、`osascript` 请求进程名超时无输出），`cua-driver` 与 `open-computer-use` 二进制缺失，
+   自动化通道不可用；为此安装的 IntelliJ IDEA CE 2025.2.5 又被 macOS 的 Gatekeeper 隔离标记挡住
+   （`xattr -dr com.apple.quarantine` 返回 Operation not permitted），JVM 从未启动，无法无人值守执行。
+
+因此 AC-12 保持 PARTIAL（其文本要求 IDE 走查）：真实项目试用（java-pi）已通过，IDE 子项为
+**明说的、已决定的缺口**，不再作为待办。
 
 ## 准备
 

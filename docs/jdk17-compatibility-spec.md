@@ -2,7 +2,7 @@
 
 日期：2026-10-15
 
-状态：实现与本机验证完成，java-pi 实际项目试用已通过，远程 CI 已执行并全绿（run `38684961127`，逐条结果见 [validation/migration-results.md](validation/migration-results.md) 的 CI 小节）；IDEA 演练与发布仍未执行。
+状态：实现与本机验证完成，java-pi 实际项目试用已通过，远程 CI 已执行并全绿（run `38684961127`，逐条结果见 [validation/migration-results.md](validation/migration-results.md) 的 CI 小节）；IDEA 演练由维护者决定 waive（2026-10-15，理由见 [validation/idea-walkthrough.md](validation/idea-walkthrough.md)），发布（AC-14）仍未执行。
 
 基线提交：`109ceaf`。本文中的“计划执行项”描述的是验收设计；实际执行状态以 validation 目录为准。
 
@@ -437,13 +437,13 @@ mvn -B -ntp verify -Pspring-native-it -DnativeImageExecutable=<绝对路径>
 - [x] AC-09：Spring AOT 的真实生成配置进入报告，并核实其实际原生消费路径。
 - [x] AC-10：Spring 基线与裁剪后 HTTP/动态操作等价，预期去重生效，负向对照有效。
 - [x] AC-11：所需 native 场景没有因工具缺失静默跳过；完整命令、退出码和日志归档。
-- [ ] AC-12：维护者终端/IDEA 演练及至少一个实际项目试用记录可复查。（PARTIAL：真实项目试用已完成，见 [java-pi-trial.md](validation/java-pi-trial.md)；IDEA 走查未执行 —— 本机未安装 IntelliJ，走查脚本见 [idea-walkthrough.md](validation/idea-walkthrough.md)。）
+- [ ] AC-12：维护者终端/IDEA 演练及至少一个实际项目试用记录可复查。（PARTIAL：真实项目试用已完成，见 [java-pi-trial.md](validation/java-pi-trial.md)；IDEA 子项由维护者决定 **waive**（2026-10-15）——插件无 IDE 集成，且本机无可用自动化通道，理由见 [idea-walkthrough.md](validation/idea-walkthrough.md)；该子项不再作为待办。）
 - [x] AC-13：README 记录运行 JDK、构建 JDK、业务目标和 native 工具链的区别及支持边界。
 - [ ] AC-14：所有测试结果对应候选提交；发布使用新版本号，声明不超出已验证范围。（PARTIAL：所有结果已锚定到 1.1.0 候选提交；打 tag 与发布尚未执行。）
 - [x] AC-15：两个独立 Maven 项目在插件 checkout 之外，仅消费插件坐标完成验证；不依赖插件源码、测试类或 reactor。
 
 AC-01～AC-11、AC-15 是技术验收，均已通过；AC-12～AC-14 是“可供普通用户采用”的交付验收。
-实际项目试用已记录（见 AC-12），但 IDEA 走查与发布仍未执行，因此不能把全部工作标记完成。
+实际项目试用已记录（见 AC-12）；IDEA 走查已由维护者决定 waive，发布仍未执行，因此不能把全部工作标记完成。
 
 ## 11. 官方参考
 
