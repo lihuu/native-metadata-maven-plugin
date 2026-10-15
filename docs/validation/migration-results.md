@@ -137,6 +137,10 @@ These changed no production code and no artifact byte; the frozen hash stayed th
   mentions and the untouched sources, against the Invoker clone. All five failure modes were exercised
   by tampering with the clone (broad flag back, required member dropped, untouched entry changed,
   source rewritten, changelog widened).
+- `.github/workflows/ci.yml`: the matrix is now skipped at *job* level when every changed file is
+  markdown or the licence, and a superseded run is cancelled. A trigger-level filter was tried first
+  and reverted: it makes a required status check unsatisfiable for a documentation-only pull request,
+  because the check is never created. The detector job always runs, so the gate always reports.
 - `docs/validation/idea-walkthrough.md`: the IDEA runbook, `NOT_RUN`.
 - A detached-kit proof (no plugin source, classes or reactor) with a working directory containing
   spaces, real GraalVM 17 / Maven 3.9.9 and the frozen artifact: `evidence/detached-kit/space-path/`.
