@@ -21,6 +21,17 @@ meaningful.
 
 `verify.sh` runs all three and writes its evidence under `target/plain-native-evidence`.
 
+`verify-pruning.sh` asks the same question without needing a native toolchain: on an already-built
+copy of this project it asserts that the changelog changed exactly `com.example.plain.Greeting`, that
+the configuration the native build consumes still carries every member the application reflects on,
+that entries no rule mentions are untouched, and that `src/` was not rewritten in place. The plugin's
+own `mvn verify` runs it against its Invoker clone.
+
+```sh
+# Built project and the pristine copy to compare its sources against
+./verify-pruning.sh --project <built-project> --source .
+```
+
 ## Prerequisites
 
 - A GraalVM JDK that contains `native-image` (any of 17, 21, 25; this sample's business code targets
