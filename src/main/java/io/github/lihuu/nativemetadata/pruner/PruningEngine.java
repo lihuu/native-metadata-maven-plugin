@@ -200,7 +200,7 @@ public final class PruningEngine {
         if (target.allDeclaredFields() && !covering.allDeclaredFields()) {
             return false;
         }
-        if (target.allPublicFields() && !covering.allDeclaredFields() && !covering.allPublicFields()) {
+        if (target.allPublicFields() && !covering.allPublicFields()) {
             return false;
         }
         if (!covering.allDeclaredFields()) {
@@ -235,7 +235,7 @@ public final class PruningEngine {
         if (target.allDeclaredMethods() && !covering.allDeclaredMethods()) {
             return false;
         }
-        if (target.allPublicMethods() && !covering.allDeclaredMethods() && !covering.allPublicMethods()) {
+        if (target.allPublicMethods() && !covering.allPublicMethods()) {
             return false;
         }
         if (!covering.allDeclaredMethods()) {
@@ -254,24 +254,41 @@ public final class PruningEngine {
         if (target.queryAllDeclaredMethods() && !covering.allDeclaredMethods() && !covering.queryAllDeclaredMethods()) {
             return false;
         }
-        if (target.queryAllPublicMethods() && !covering.allDeclaredMethods() && !covering.allPublicMethods()
-                && !covering.queryAllDeclaredMethods() && !covering.queryAllPublicMethods()) {
+        if (target.queryAllPublicMethods() && !covering.allPublicMethods() && !covering.queryAllPublicMethods()) {
             return false;
         }
         for (MethodConfig mc : target.queriedMethods()) {
-            boolean found = covering.methods().stream().anyMatch(m -> m.name().equals(mc.name()) && m.parameterTypes().equals(mc.parameterTypes()))
-                    || covering.queriedMethods().stream().anyMatch(m -> m.name().equals(mc.name()) && m.parameterTypes().equals(mc.parameterTypes()))
-                    || covering.allDeclaredMethods() || covering.queryAllDeclaredMethods();
+            boolean constructor = mc.name().equals("<init>");
+            boolean explicitMatch = covering.methods().stream().anyMatch(m -> m.name().equals(mc.name())
+                    && m.parameterTypes().equals(mc.parameterTypes()))
+                    || covering.queriedMethods().stream().anyMatch(m -> m.name().equals(mc.name())
+                    && m.parameterTypes().equals(mc.parameterTypes()));
+            boolean allCovered = constructor
+                    ? covering.allDeclaredConstructors() || covering.queryAllDeclaredConstructors()
+                    : covering.allDeclaredMethods() || covering.queryAllDeclaredMethods();
+            boolean found = explicitMatch || allCovered;
             if (!found) {
                 return false;
             }
+        }
+
+        // Constructor queries have their own permissions. Constructors are never inherited,
+        // so declared constructor coverage also covers public constructors.
+        if (target.queryAllDeclaredConstructors()
+                && !covering.allDeclaredConstructors() && !covering.queryAllDeclaredConstructors()) {
+            return false;
+        }
+        if (target.queryAllPublicConstructors()
+                && !covering.allDeclaredConstructors() && !covering.allPublicConstructors()
+                && !covering.queryAllDeclaredConstructors() && !covering.queryAllPublicConstructors()) {
+            return false;
         }
 
         // Classes check
         if (target.allDeclaredClasses() && !covering.allDeclaredClasses()) {
             return false;
         }
-        if (target.allPublicClasses() && !covering.allDeclaredClasses() && !covering.allPublicClasses()) {
+        if (target.allPublicClasses() && !covering.allPublicClasses()) {
             return false;
         }
 
