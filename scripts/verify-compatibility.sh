@@ -132,6 +132,16 @@ if [ -z "$REQUIRE_CONFIG_CHANGE" ]; then
   if [ "$SAMPLE" = "plain-native" ]; then REQUIRE_CONFIG_CHANGE="true"; else REQUIRE_CONFIG_CHANGE="false"; fi
 fi
 
+# --evidence is used in two places that run after a `cd` into the work copy: the consumption log
+# redirect and $REPO, the isolated repository the candidate was staged into. A relative value would
+# resolve against the work copy there - the redirect fails and Maven is pointed at an empty
+# repository instead of the staged one. Both happen in CI, which passes `--evidence target/compat`:
+# every consume job died on the first of them, and the second would have followed. Absolute here.
+if [ -n "$EVIDENCE_ROOT" ]; then
+  mkdir -p "$EVIDENCE_ROOT" || { echo "ERROR: cannot create --evidence directory: $EVIDENCE_ROOT" >&2; exit 2; }
+  EVIDENCE_ROOT="$(cd "$EVIDENCE_ROOT" && pwd)"
+fi
+
 EVIDENCE="$EVIDENCE_ROOT/$CASE_ID"
 REPO="$EVIDENCE/repo"
 

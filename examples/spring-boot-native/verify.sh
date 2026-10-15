@@ -5,7 +5,7 @@
 #   A baseline   Spring AOT + native build with the plugin disabled; real HTTP requests
 #   B pruned     Spring AOT + native build with the plugin enabled; the same HTTP requests must
 #                return the same payloads, the self-owned duplicate must have been removed, and the
-#                generated/source metadata must be byte-identical to A
+#                sources plus the set of AOT-generated files must be identical to A
 #   C negative   a copy of the project with the RuntimeHints registration and the self-owned
 #                duplicate removed everywhere; the dynamic request must now fail
 #
@@ -68,6 +68,10 @@ if [ -n "$MAVEN_HOME_ARG" ]; then MVN="$MAVEN_HOME_ARG/bin/mvn"; else MVN="$(com
 
 EVIDENCE="${EVIDENCE:-$PROJECT_DIR/target/spring-native-evidence}"
 mkdir -p "$EVIDENCE"
+# $EVIDENCE and everything derived from it are used inside `( cd <work> && ... )` subshells below,
+# where a relative --evidence would resolve against the work directory instead. Same failure mode
+# as scripts/verify-compatibility.sh; make it absolute once, here.
+EVIDENCE="$(cd "$EVIDENCE" && pwd)"
 
 PYTHON="$(command -v python3 || command -v python)"
 [ -n "$PYTHON" ] || { echo "ERROR: python3 is required" >&2; exit 2; }
@@ -197,12 +201,25 @@ PY
 }
 
 snapshot_metadata() {
-  # Hash every metadata file in the native input, plus the sources, so that "the plugin did not
-  # rewrite them" is checked rather than assumed.
+  # Two things the plugin promises not to touch, checked in two different ways.
+  #
+  # src/ is hashed by content: "the plugin does not rewrite the project" is a byte-level promise.
+  #
+  # target/spring-aot/ is only listed. Spring AOT regenerates it on every Maven run, and its
+  # Application__BeanFactoryRegistrations output is not byte-stable across runs of the *same*
+  # configuration - in CI, one GraalVM 21 job produced two different hashes for it across three runs
+  # while the untouched src/ stayed identical - so comparing those bytes between A and B reports the
+  # AOT's own variance as a plugin regression. The file set is stable, and the plugin must not add
+  # or remove anything in a directory it only reads.
   local work="$1" out="$2"
-  : > "$out"
-  find "$work/src" "$work/target/spring-aot" -type f 2>/dev/null | sort | while read -r f; do
-    echo "$(sha256 "$f")  ${f#$work/}" >> "$out"
+  local src="$out/source-hashes.txt" aot="$out/aot-file-list.txt"
+  : > "$src"
+  : > "$aot"
+  find "$work/src" -type f 2>/dev/null | sort | while read -r f; do
+    echo "$(sha256 "$f")  ${f#$work/}" >> "$src"
+  done
+  find "$work/target/spring-aot" -type f 2>/dev/null | sort | while read -r f; do
+    echo "${f#$work/}" >> "$aot"
   done
 }
 
@@ -239,7 +256,7 @@ run_case_a() {
   else
     failures=$((failures+1)); record "A-aot-missing-FAIL"; log "A FAILED: no AOT registration in the native input"; return
   fi
-  snapshot_metadata "$PROJECT_DIR" "$dir/metadata-hashes.txt"
+  snapshot_metadata "$PROJECT_DIR" "$dir"
   cp "$PROJECT_DIR/target/classes/META-INF/native-image/com.example.boot/reflect-config.json" "$dir/self-owned-config.json" 2>/dev/null
   if run_http_suite "$PROJECT_DIR" "$dir" A; then
     record "A-baseline-PASS"; log "A PASS"
@@ -258,7 +275,7 @@ run_case_b() {
   cp "$PROJECT_DIR/target/native-metadata/changelog.json" "$dir/changelog.json" 2>/dev/null
   cp "$PROJECT_DIR/target/native-metadata/report.json" "$dir/report.json" 2>/dev/null
   cp "$PROJECT_DIR/target/classes/META-INF/native-image/com.example.boot/reflect-config.json" "$dir/self-owned-config.json" 2>/dev/null
-  snapshot_metadata "$PROJECT_DIR" "$dir/metadata-hashes.txt"
+  snapshot_metadata "$PROJECT_DIR" "$dir"
 
   if ! grep -q '"DELETED"' "$dir/changelog.json" 2>/dev/null; then
     failures=$((failures+1)); record "B-no-dedup-FAIL"; log "B FAILED: expected the self-owned duplicate to be removed"; return
@@ -266,11 +283,17 @@ run_case_b() {
   if ! grep -qi 'generated' "$dir/changelog.json" 2>/dev/null; then
     failures=$((failures+1)); record "B-dedup-source-FAIL"; log "B FAILED: dedup reason does not name a generated source"; return
   fi
-  # The source and the generated directory must be untouched by the plugin.
-  if ! cmp -s "$dir/metadata-hashes.txt" "$EVIDENCE/A-baseline/metadata-hashes.txt"; then
-    failures=$((failures+1)); record "B-source-or-generated-change-FAIL"
-    log "B FAILED: source/generated files differ from A; inspect metadata-diff.txt"
-    diff "$EVIDENCE/A-baseline/metadata-hashes.txt" "$dir/metadata-hashes.txt" | head -20 > "$dir/metadata-diff.txt"
+  # The sources and the generated directory must be untouched by the plugin.
+  if ! cmp -s "$dir/source-hashes.txt" "$EVIDENCE/A-baseline/source-hashes.txt"; then
+    failures=$((failures+1)); record "B-source-change-FAIL"
+    log "B FAILED: source files differ from A; inspect source-diff.txt"
+    diff "$EVIDENCE/A-baseline/source-hashes.txt" "$dir/source-hashes.txt" | head -20 > "$dir/source-diff.txt"
+    return
+  fi
+  if ! cmp -s "$dir/aot-file-list.txt" "$EVIDENCE/A-baseline/aot-file-list.txt"; then
+    failures=$((failures+1)); record "B-generated-set-change-FAIL"
+    log "B FAILED: the set of Spring AOT generated files changed; inspect aot-diff.txt"
+    diff "$EVIDENCE/A-baseline/aot-file-list.txt" "$dir/aot-file-list.txt" | head -20 > "$dir/aot-diff.txt"
     return
   fi
   if ! check_native_input_has_registration "$PROJECT_DIR" > "$dir/native-input-registration.txt"; then
