@@ -3,8 +3,25 @@ name: CI
 on:
   push:
     branches: [ main ]
+    # A change that only touches prose cannot change what the build, the JDK/Maven matrix or the
+    # native samples do, so it does not start a twelve-minute run. Two deliberate details:
+    #   - the list is "markdown + licence", not "docs/**", because docs/validation/toolchains.json
+    #     is an input to scripts/ci-install-toolchain.sh: changing it must still run everything;
+    #   - paths-ignore only skips a run when *every* changed file matches, so a commit that edits
+    #     documentation next to a source file still runs the matrix.
+    paths-ignore: &documentation-only
+      - '*.md'
+      - '**/*.md'
+      - 'LICENSE'
   pull_request:
     branches: [ main ]
+    paths-ignore: *documentation-only
+
+# One run per branch at a time: pushing twice in a row cancels the superseded run instead of paying
+# for both. The cancelled run is not a failure - the newer commit replaces it.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
