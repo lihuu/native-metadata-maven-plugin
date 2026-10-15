@@ -1,5 +1,5 @@
 {
-  "$comment": "Pinned toolchains for the JDK 17 migration. See docs/validation/baseline.md and docs/jdk17-migration-plan.md (P0). Only entries marked verifiedInThisSession=true were downloaded and hash-checked end to end; the Linux CI entries are locked to the vendored .sha256/.sha512 published next to the artifact, which was fetched and recorded but whose tarball was not downloaded here.",
+  "$comment": "Pinned toolchains for the JDK 17 migration. See docs/validation/baseline.md and docs/jdk17-migration-plan.md (P0). Only entries marked verifiedInThisSession=true were downloaded and hash-checked end to end; the Linux CI entries are locked to the vendored .sha256/.sha512 published next to the artifact, which was fetched and recorded but whose tarball was not downloaded here. One CI job is deliberately not covered here: the macOS smoke job in .github/workflows/ci.yml, which only consumes the staged artifact to prove the plugin works on another OS - it builds nothing, its runtime comes from graalvm/setup-graalvm@v1 and is therefore not digest-checked.",
   "platforms": {
     "local": {
       "os": "macOS 27.2",
