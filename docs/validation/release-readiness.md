@@ -14,6 +14,9 @@
 - [x] 远程 CI 执行并全绿：run `38684961127`（head `d0f1f82`），19/19 jobs PASS，含 acceptance summary。
 - [x] 候选 JAR/POM 和源码清单保存；README 说明运行、构建和业务目标版本的区别。
 
+CI 触发策略：`main` 的保护规则要求 PR 且要求 `acceptance summary` 通过；该 workflow 永远启动，
+由 `detect changed paths` 判断是否需要跑矩阵，因此"仅文档"的 PR 会跳过矩阵但门禁照常出现（几秒钟）。
+
 后续交付门禁：
 
 - [ ] IDEA Maven Runner / Project SDK 手动演练，见 [idea-walkthrough.md](idea-walkthrough.md)。
