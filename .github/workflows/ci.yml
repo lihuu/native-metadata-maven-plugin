@@ -1,21 +1,23 @@
 name: CI
 
+# Why the detector job below instead of a paths-ignore filter on the triggers.
+#
+# "Do not run a twelve-minute matrix for a documentation-only change" and "the repository can require
+# this workflow's gate check before merging" pull in opposite directions when the filter sits on the
+# trigger: a documentation-only change then starts no workflow at all, so the required check never
+# appears on that commit and the pull request waits for it forever. (A job that runs and is *skipped*
+# counts as passing; a check that was never created does not exist.)
+#
+# So the workflow always starts. `changes` decides whether the change can affect the build in a few
+# seconds, `build` and everything downstream of it are skipped when it cannot, and the gate job always
+# runs and reports success for "nothing to verify". The matrix is skipped for documentation, and the
+# required check still exists.
+
 on:
   push:
     branches: [ main ]
-    # A change that only touches prose cannot change what the build, the JDK/Maven matrix or the
-    # native samples do, so it does not start a twelve-minute run. Two deliberate details:
-    #   - the list is "markdown + licence", not "docs/**", because docs/validation/toolchains.json
-    #     is an input to scripts/ci-install-toolchain.sh: changing it must still run everything;
-    #   - paths-ignore only skips a run when *every* changed file matches, so a commit that edits
-    #     documentation next to a source file still runs the matrix.
-    paths-ignore: &documentation-only
-      - '*.md'
-      - '**/*.md'
-      - 'LICENSE'
   pull_request:
     branches: [ main ]
-    paths-ignore: *documentation-only
 
 # One run per branch at a time: pushing twice in a row cancels the superseded run instead of paying
 # for both. The cancelled run is not a failure - the newer commit replaces it.
@@ -31,11 +33,63 @@ env:
 
 jobs:
   # ---------------------------------------------------------------------------------------------
+  # D1: the detector. Always runs, takes seconds, and produces the gate's `needs.changes` input.
+  #
+  # "Documentation only" here means: every changed file is markdown or the licence. Note what is *not*
+  # in that set - docs/validation/toolchains.json is an input to scripts/ci-install-toolchain.sh, so
+  # changing it must still run the matrix. It does: it is not markdown.
+  #
+  # The bias is fail-safe. If the diff cannot be computed (shallow checkout, rewritten base, first
+  # push of a branch) the answer is "code changed" and the full matrix runs - a skipped matrix is only
+  # ever allowed on evidence.
+  # ---------------------------------------------------------------------------------------------
+  changes:
+    name: detect changed paths
+    runs-on: ubuntu-22.04
+    outputs:
+      code: ${{ steps.detect.outputs.code }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - id: detect
+        name: Decide whether this change can affect the build
+        run: |
+          set -uo pipefail
+          range=""
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            git fetch --no-tags --quiet origin "${{ github.base_ref }}" || true
+            range="origin/${{ github.base_ref }}...HEAD"
+          else
+            base="${{ github.event.before }}"
+            case "$base" in
+              ""|0000000000000000000000000000000000000000) range="HEAD~1..HEAD" ;;
+              *) range="$base..HEAD" ;;
+            esac
+          fi
+
+          code=true
+          if changed="$(git diff --name-only "$range" 2>/dev/null)"; then
+            if [ -n "$changed" ] && ! printf '%s\n' "$changed" | grep -qvE '^.*\.md$|^LICENSE$'; then
+              code=false
+            fi
+          fi
+          printf '%s\n' "$changed" | sed 's/^/  /'
+          echo "range=$range code=$code"
+          echo "code=$code" >> "$GITHUB_OUTPUT"
+
+  # ---------------------------------------------------------------------------------------------
   # B25: build the plugin with GraalVM 25 (Java 25), run the unit tests and the non-native
   # integration test, and publish the single artifact every later job consumes.
+  #
+  # Everything downstream needs this job, so skipping it skips the whole matrix; the gate below is
+  # the only job that still runs.
   # ---------------------------------------------------------------------------------------------
   build:
     name: build (GraalVM 25, Maven 3.9.9)
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
@@ -482,7 +536,7 @@ jobs:
   acceptance-summary:
     name: acceptance summary
     if: always()
-    needs: [build, unit-core, consume, plain-openjdk-17, multi-release, native-plain, native-spring, macos-smoke]
+    needs: [changes, build, unit-core, consume, plain-openjdk-17, multi-release, native-plain, native-spring, macos-smoke]
     runs-on: ubuntu-22.04
     steps:
       - name: Summarise
@@ -490,6 +544,7 @@ jobs:
           {
             echo "| job | result |"
             echo "| --- | --- |"
+            echo "| changes (D1) | ${{ needs.changes.result }} - code=${{ needs.changes.outputs.code }} |"
             echo "| build (B25) | ${{ needs.build.result }} |"
             echo "| unit-core (U17/U21) | ${{ needs.unit-core.result }} |"
             echo "| consume (R17/R21/R25 x Maven) | ${{ needs.consume.result }} |"
@@ -498,9 +553,19 @@ jobs:
             echo "| native-plain (N17/N25) | ${{ needs.native-plain.result }} |"
             echo "| native-spring (S17/S21) | ${{ needs.native-spring.result }} |"
             echo "| macos-smoke (MAC) | ${{ needs.macos-smoke.result }} |"
+            if [ "${{ needs.changes.outputs.code }}" != "true" ]; then
+              echo ""
+              echo "Documentation-only change: the matrix did not run, by design. See the note at the top"
+              echo "of .github/workflows/ci.yml. This job is the merge gate and it still ran."
+            fi
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Fail if any required job did not succeed
+        # Skipped is only acceptable in one case, and it is not "the job failed to start": a job that
+        # did not run because the detector said there was nothing to verify. With code=true, every
+        # result must be exactly "success" - a skipped or cancelled job is a failure here, which is
+        # the property this job exists for.
+        if: needs.changes.outputs.code == 'true'
         run: |
           failed=""
           for result in \
