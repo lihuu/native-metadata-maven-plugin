@@ -1,0 +1,18 @@
+[
+  {
+    "resource": "META-INF/native-image/com.example.plain/reflect-config.json",
+    "type": "com.example.plain.Greeting",
+    "replacement": {
+      "name": "com.example.plain.Greeting",
+      "fields": [
+        { "name": "message" }
+      ],
+      "methods": [
+        { "name": "<init>", "parameterTypes": [] },
+        { "name": "<init>", "parameterTypes": ["java.lang.String"] },
+        { "name": "label", "parameterTypes": [] },
+        { "name": "describe", "parameterTypes": ["java.lang.String[]"] }
+      ]
+    }
+  }
+]

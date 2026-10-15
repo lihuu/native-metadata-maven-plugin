@@ -12,6 +12,7 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -30,6 +31,12 @@ public final class ClasspathMetadataScanner {
 
     @NotNull
     public ClasspathMetadataResult scan(@NotNull List<String> classpath, @NotNull List<Path> ownedConfigs) throws IOException {
+        return scan(classpath, ownedConfigs, MetadataSourceScope.none());
+    }
+
+    @NotNull
+    public ClasspathMetadataResult scan(@NotNull List<String> classpath, @NotNull List<Path> ownedConfigs,
+                                        @NotNull MetadataSourceScope scope) throws IOException {
         Map<String, String> ownedResources = new LinkedHashMap<>();
         for (Path ownedPath : ownedConfigs) {
             if (Files.isRegularFile(ownedPath)) {
@@ -61,11 +68,17 @@ public final class ClasspathMetadataScanner {
                             continue;
                         }
                         String content = Files.readString(file);
-                        processResource(file.toString(), resName, content, ownedResources, sources, registrationsByClass);
+                        processResource(file.toString(), file.toAbsolutePath().normalize(), false,
+                                resName, content, ownedResources, sources, registrationsByClass, scope);
                     }
                 }
             } else if (Files.isRegularFile(path) && (entry.endsWith(".jar") || entry.endsWith(".zip"))) {
+                Path jarPath = path.toAbsolutePath().normalize();
                 try (JarFile jar = new JarFile(path.toFile(), false, ZipFile.OPEN_READ, Runtime.version())) {
+                    // versionedStream() is the JVM's own multi-release selection. Note that the JAR
+                    // specification does not allow versioned resources under META-INF, and this
+                    // method implements that: META-INF/native-image/... is read from its
+                    // unversioned entry only, whatever META-INF/versions/N/... contains.
                     List<JarEntry> jarEntries = jar.versionedStream()
                             .filter(e -> !e.isDirectory())
                             .filter(e -> isReflectionResource(Path.of(e.getName()).getFileName().toString()))
@@ -76,8 +89,9 @@ public final class ClasspathMetadataScanner {
                         String resName = extractResourceName(jarEntry.getName());
                         try (InputStream is = jar.getInputStream(jarEntry)) {
                             String content = new String(is.readAllBytes(), StandardCharsets.UTF_8);
-                            String source = path + "!/" + jarEntry.getRealName();
-                            processResource(source, resName, content, ownedResources, sources, registrationsByClass);
+                            String source = jarPath + "!/" + jarEntry.getRealName();
+                            processResource(source, jarPath, true, resName, content, ownedResources,
+                                    sources, registrationsByClass, scope);
                         }
                     }
                 }
@@ -90,10 +104,12 @@ public final class ClasspathMetadataScanner {
         );
     }
 
-    private void processResource(String source, String resourceName, String content,
+    private void processResource(String source, Path physicalPath, boolean insideArchive,
+                                 String resourceName, String content,
                                  Map<String, String> ownedResources,
                                  List<DiscoveredMetadataSource> sources,
-                                 Map<String, List<DiscoveredRegistration>> registrationsByClass) {
+                                 Map<String, List<DiscoveredRegistration>> registrationsByClass,
+                                 MetadataSourceScope scope) {
         MetadataDocument doc;
         try {
             doc = MetadataDocument.parse(content);
@@ -106,35 +122,90 @@ public final class ClasspathMetadataScanner {
             return;
         }
 
-        MetadataScope scope;
+        // Ownership is decided by physical location, not by the resource path. A dependency JAR that
+        // happens to contain META-INF/native-image/<group>/<artifact>/reflect-config.json - which is
+        // exactly what a published library looks like, and which a project's own resource path can
+        // collide with - is a dependency registration, not a copy of this project's configuration.
+        MetadataScope metadataScope;
         Boolean matchesSource = null;
-        if (ownedResources.containsKey(resourceName)) {
-            scope = MetadataScope.PACKAGED_PROJECT;
-            matchesSource = content.strip().equals(ownedResources.get(resourceName).strip());
+        if (!insideArchive && isInsideAny(physicalPath, scope.generatedRoots())) {
+            metadataScope = MetadataScope.GENERATED;
+        } else if (!insideArchive && isInsideAny(physicalPath, scope.projectOutputRoots())) {
+            if (ownedResources.containsKey(resourceName)) {
+                metadataScope = MetadataScope.PACKAGED_PROJECT;
+                matchesSource = content.strip().equals(ownedResources.get(resourceName).strip());
+            } else {
+                // Build output that is not one of the project's own files: AOT or other generated
+                // resources copied into the output directory.
+                metadataScope = MetadataScope.GENERATED;
+            }
         } else if (source.contains("/picocli-generated/")) {
-            scope = MetadataScope.GENERATED;
+            metadataScope = MetadataScope.GENERATED;
         } else {
-            scope = MetadataScope.DEPENDENCY;
+            metadataScope = MetadataScope.DEPENDENCY;
         }
+
+        boolean consumedByNativeBuild = isConsumedByNativeBuild(physicalPath, metadataScope, scope);
 
         DiscoveredMetadataSource metaSource = new DiscoveredMetadataSource(
                 source,
                 resourceName,
-                scope,
+                metadataScope,
                 true,
                 doc.entries().size(),
-                0,
+                doc.unsupportedEntryCount(),
                 matchesSource,
+                consumedByNativeBuild,
                 doc
         );
         sources.add(metaSource);
 
-        if (scope != MetadataScope.PACKAGED_PROJECT) {
+        if (metadataScope != MetadataScope.PACKAGED_PROJECT) {
             for (ReflectionEntry entry : doc.entries()) {
                 registrationsByClass.computeIfAbsent(entry.name(), k -> new ArrayList<>())
                         .add(new DiscoveredRegistration(metaSource, entry));
             }
         }
+    }
+
+    /**
+     * A registration can only justify deleting the project's own entry if the native build reads it.
+     * Compiled-only and provided dependencies are on the Maven compile classpath but not in the image.
+     */
+    private static boolean isConsumedByNativeBuild(Path physicalPath, MetadataScope metadataScope,
+                                                   MetadataSourceScope scope) {
+        if (metadataScope == MetadataScope.PACKAGED_PROJECT) {
+            return false;
+        }
+        if (metadataScope == MetadataScope.GENERATED) {
+            return isInsideAny(physicalPath, scope.generatedRoots())
+                    || isInsideAny(physicalPath, scope.projectOutputRoots());
+        }
+        for (String entry : scope.nativeInputClasspath()) {
+            Path entryPath;
+            try {
+                entryPath = Path.of(entry).toAbsolutePath().normalize();
+            } catch (RuntimeException e) {
+                continue;
+            }
+            if (Files.isDirectory(entryPath)) {
+                if (physicalPath.startsWith(entryPath)) {
+                    return true;
+                }
+            } else if (physicalPath.equals(entryPath)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean isInsideAny(Path physicalPath, List<Path> roots) {
+        for (Path root : roots) {
+            if (physicalPath.startsWith(root.toAbsolutePath().normalize())) {
+                return true;
+            }
+        }
+        return false;
     }
 
     public static boolean isReflectionResource(@NotNull String fileName) {
@@ -149,5 +220,18 @@ public final class ClasspathMetadataScanner {
             return normalized.substring(metaInfIdx);
         }
         return "";
+    }
+
+    /** Resource names that came from the project's own configuration, for ownership reporting. */
+    @NotNull
+    public static Set<String> ownedResourceNames(@NotNull List<Path> ownedConfigs) {
+        Set<String> names = new LinkedHashSet<>();
+        for (Path ownedConfig : ownedConfigs) {
+            String name = extractResourceName(ownedConfig.toString());
+            if (!name.isEmpty()) {
+                names.add(name);
+            }
+        }
+        return names;
     }
 }

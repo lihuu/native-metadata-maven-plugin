@@ -1,0 +1,25 @@
+[
+  {
+    "name": "com.example.plain.Greeting",
+    "allDeclaredFields": true,
+    "allDeclaredConstructors": true,
+    "allDeclaredMethods": true
+  },
+  {
+    "name": "com.example.plain.Greeting",
+    "allDeclaredFields": true,
+    "allDeclaredConstructors": true,
+    "allDeclaredMethods": true
+  },
+  {
+    "name": "com.example.plain.Point",
+    "allDeclaredFields": true,
+    "allDeclaredConstructors": true,
+    "allDeclaredMethods": true
+  },
+  {
+    "name": "com.example.plain.Unused",
+    "allDeclaredConstructors": true,
+    "allDeclaredMethods": true
+  }
+]

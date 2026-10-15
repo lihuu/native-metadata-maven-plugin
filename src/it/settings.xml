@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Settings for the in-repo Invoker runs.
+
+  Deliberately empty of mirrors, servers and a <localRepository>: the point of these runs is that
+  the plugin under test comes from target/it-repo, which the Invoker plugin populates from the
+  artifacts of the current build. Inheriting a developer's settings.xml could redirect resolution
+  or add credentials, and a build whose result depends on that is not reproducible.
+
+  Dependencies still come from Maven Central, so the runs need network access (or a warm cache in
+  target/it-repo).
+-->
+<settings xmlns="http://maven.apache.org/SETTINGS/1.0.0"
+          xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+          xsi:schemaLocation="http://maven.apache.org/SETTINGS/1.0.0 http://maven.apache.org/xsd/settings-1.0.0.xsd"/>

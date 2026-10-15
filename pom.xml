@@ -6,7 +6,14 @@
 
     <groupId>io.github.lihuu</groupId>
     <artifactId>native-metadata-maven-plugin</artifactId>
-    <version>1.0.0</version>
+    <!--
+      1.1.0, not 1.0.0. 1.0.0 is published on Maven Central and is the Java 25 / Class-File API build.
+      Reusing that number would mean that any project which fails to stage this build can silently
+      resolve the published, incompatible artifact from central under the same coordinates - which is
+      exactly what happened during verification. A new number makes "the artifact under test" and
+      "the artifact a user gets by default" the same thing only when someone deliberately published it.
+    -->
+    <version>1.1.0</version>
     <packaging>maven-plugin</packaging>
 
     <name>Native Metadata Maven Plugin</name>
@@ -35,9 +42,17 @@
 
     <properties>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
-        <maven.compiler.release>25</maven.compiler.release>
+        <!--
+          The plugin itself, and its tests, are compiled for Java 17. This is the runtime baseline
+          advertised to users: the plugin runs inside the Maven JVM, and the supported Maven JVMs
+          start at GraalVM/OpenJDK 17. Building the plugin is a separate concern; see the README.
+        -->
+        <maven.compiler.release>17</maven.compiler.release>
         <jackson.version>2.18.3</jackson.version>
         <junit.version>5.12.0</junit.version>
+        <!-- Single bytecode backend: ASM. This is a plugin *runtime* dependency. -->
+        <asm.version>9.11</asm.version>
+        <invoker.version>3.10.1</invoker.version>
     </properties>
 
     <dependencies>
@@ -64,6 +79,17 @@
             <artifactId>jackson-databind</artifactId>
             <version>${jackson.version}</version>
         </dependency>
+        <!--
+          The scanner reads class files with ASM so that a Java 17 Maven JVM can inspect Java 21/25
+          bytecode. Only the core module is needed: the scanner uses a streaming visitor, not the
+          tree API (asm-tree). Do not add asm-commons/asm-util without a concrete need; every added
+          runtime dependency has to stay Java 17 loadable.
+        -->
+        <dependency>
+            <groupId>org.ow2.asm</groupId>
+            <artifactId>asm</artifactId>
+            <version>${asm.version}</version>
+        </dependency>
         <dependency>
             <groupId>org.jetbrains</groupId>
             <artifactId>annotations</artifactId>
@@ -87,7 +113,11 @@
                 <artifactId>maven-compiler-plugin</artifactId>
                 <version>3.14.0</version>
                 <configuration>
-                    <release>25</release>
+                    <!--
+                      Single source of truth: maven.compiler.release=17 above. An explicit <release>
+                      here previously duplicated (and contradicted) the property, which is how the
+                      build kept producing Java 25 classes while the property looked configurable.
+                    -->
                 </configuration>
             </plugin>
             <plugin>
@@ -97,21 +127,44 @@
             </plugin>
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-jar-plugin</artifactId>
+                <version>3.4.2</version>
+                <configuration>
+                    <!-- The plugin records its own version in environment.json; without this the
+                         JAR manifest has no Implementation-Version to report. -->
+                    <archive>
+                        <manifest>
+                            <addDefaultImplementationEntries>true</addDefaultImplementationEntries>
+                        </manifest>
+                    </archive>
+                </configuration>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-plugin-plugin</artifactId>
                 <version>3.15.1</version>
                 <configuration>
                     <goalPrefix>native-metadata</goalPrefix>
+                    <!--
+                      Declared in the plugin descriptor. This is a courtesy to Maven, not a
+                      substitute for running on a real JDK 17: Maven 3 does not reliably refuse a
+                      plugin whose classes are newer than the JVM, so the compatibility matrix is
+                      still what proves support.
+                    -->
+                    <requiredJavaVersion>17</requiredJavaVersion>
+                    <requiredMavenVersion>3.9.9</requiredMavenVersion>
                 </configuration>
                 <dependencies>
+                    <!-- Build-time only: the descriptor extractor reads mojo classes with ASM. -->
                     <dependency>
                         <groupId>org.ow2.asm</groupId>
                         <artifactId>asm</artifactId>
-                        <version>9.8</version>
+                        <version>${asm.version}</version>
                     </dependency>
                     <dependency>
                         <groupId>org.ow2.asm</groupId>
                         <artifactId>asm-commons</artifactId>
-                        <version>9.8</version>
+                        <version>${asm.version}</version>
                     </dependency>
                 </dependencies>
                 <executions>
@@ -124,10 +177,157 @@
                     </execution>
                 </executions>
             </plugin>
+            <!--
+              Integration tests live in examples/, are copied to target/it, and resolve the plugin
+              from target/it-repo rather than the developer's ~/.m2. The repository there contains
+              exactly the artifact this run produced, so an integration test cannot silently pass
+              against a stale same-coordinate JAR that happens to be in the local repository.
+            -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-invoker-plugin</artifactId>
+                <version>${invoker.version}</version>
+                <configuration>
+                    <projectsDirectory>${project.basedir}/examples</projectsDirectory>
+                    <cloneProjectsTo>${project.build.directory}/it</cloneProjectsTo>
+                    <localRepositoryPath>${project.build.directory}/it-repo</localRepositoryPath>
+                    <settingsFile>${project.basedir}/src/it/settings.xml</settingsFile>
+                    <pomIncludes>
+                        <pomInclude>plain-native/pom.xml</pomInclude>
+                    </pomIncludes>
+                    <properties>
+                        <native.metadata.version>${project.version}</native.metadata.version>
+                    </properties>
+                    <streamLogs>true</streamLogs>
+                    <showErrors>true</showErrors>
+                    <failIfNoTests>true</failIfNoTests>
+                    <goals>
+                        <goal>clean</goal>
+                        <goal>package</goal>
+                    </goals>
+                </configuration>
+                <executions>
+                    <execution>
+                        <id>stage-artifact-for-invoker</id>
+                        <phase>pre-integration-test</phase>
+                        <goals>
+                            <goal>install</goal>
+                        </goals>
+                    </execution>
+                    <execution>
+                        <id>run-invoker-it</id>
+                        <phase>integration-test</phase>
+                        <goals>
+                            <goal>run</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
         </plugins>
     </build>
 
     <profiles>
+        <!--
+          Native causality for the plain sample: baseline / pruned / missing-registration.
+
+          These profiles are deliberately not part of the default build, and they are deliberately
+          not tolerant: if native-image is missing, times out or fails, the build fails. "No native
+          tool available" must never be reported as a pass.
+
+          Usage:
+            mvn -B -ntp verify -Pnative-it -DnativeImageExecutable=<absolute path>
+        -->
+        <profile>
+            <id>native-it</id>
+            <properties>
+                <nativeImageExecutable>${java.home}/bin/native-image</nativeImageExecutable>
+            </properties>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.codehaus.mojo</groupId>
+                        <artifactId>exec-maven-plugin</artifactId>
+                        <version>3.5.0</version>
+                        <executions>
+                            <execution>
+                                <id>plain-native-groups</id>
+                                <phase>integration-test</phase>
+                                <goals>
+                                    <goal>exec</goal>
+                                </goals>
+                                <configuration>
+                                    <executable>${project.basedir}/examples/plain-native/verify.sh</executable>
+                                    <workingDirectory>${project.basedir}</workingDirectory>
+                                    <arguments>
+                                        <argument>--java-home</argument>
+                                        <argument>${java.home}</argument>
+                                        <argument>--maven-home</argument>
+                                        <argument>${maven.home}</argument>
+                                        <argument>--plugin-version</argument>
+                                        <argument>${project.version}</argument>
+                                        <argument>--repo</argument>
+                                        <argument>${project.build.directory}/it-repo</argument>
+                                        <argument>--native-image</argument>
+                                        <argument>${nativeImageExecutable}</argument>
+                                        <argument>--evidence</argument>
+                                        <argument>${project.build.directory}/compat/plain-native</argument>
+                                    </arguments>
+                                </configuration>
+                            </execution>
+                        </executions>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+
+        <!--
+          Spring Boot AOT + native + HTTP equivalence. Requires the Spring sample's dependencies to
+          be resolvable and a C toolchain for the native build.
+
+          Usage:
+            mvn -B -ntp verify -Pspring-native-it -DnativeImageExecutable=<absolute path>
+        -->
+        <profile>
+            <id>spring-native-it</id>
+            <properties>
+                <nativeImageExecutable>${java.home}/bin/native-image</nativeImageExecutable>
+            </properties>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.codehaus.mojo</groupId>
+                        <artifactId>exec-maven-plugin</artifactId>
+                        <version>3.5.0</version>
+                        <executions>
+                            <execution>
+                                <id>spring-native-groups</id>
+                                <phase>integration-test</phase>
+                                <goals>
+                                    <goal>exec</goal>
+                                </goals>
+                                <configuration>
+                                    <executable>${project.basedir}/examples/spring-boot-native/verify.sh</executable>
+                                    <workingDirectory>${project.basedir}</workingDirectory>
+                                    <arguments>
+                                        <argument>--java-home</argument>
+                                        <argument>${java.home}</argument>
+                                        <argument>--maven-home</argument>
+                                        <argument>${maven.home}</argument>
+                                        <argument>--plugin-version</argument>
+                                        <argument>${project.version}</argument>
+                                        <argument>--repo</argument>
+                                        <argument>${project.build.directory}/it-repo</argument>
+                                        <argument>--evidence</argument>
+                                        <argument>${project.build.directory}/compat/spring-boot-native</argument>
+                                    </arguments>
+                                </configuration>
+                            </execution>
+                        </executions>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+
         <!--
           The profile that produces what Maven Central accepts, and nothing more.
 

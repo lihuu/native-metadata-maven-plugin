@@ -40,13 +40,25 @@ public final class MetadataDocument {
     private final Format format;
     private final Map<String, Object> rawRoot;
     private final List<ReflectionEntry> entries;
+    private final int unsupportedEntryCount;
+    private final List<String> unsupportedEntryReasons;
 
     public MetadataDocument(@NotNull Format format,
                             @NotNull Map<String, Object> rawRoot,
                             @NotNull List<ReflectionEntry> entries) {
+        this(format, rawRoot, entries, 0, Collections.emptyList());
+    }
+
+    public MetadataDocument(@NotNull Format format,
+                            @NotNull Map<String, Object> rawRoot,
+                            @NotNull List<ReflectionEntry> entries,
+                            int unsupportedEntryCount,
+                            @NotNull List<String> unsupportedEntryReasons) {
         this.format = format;
         this.rawRoot = Collections.unmodifiableMap(new LinkedHashMap<>(rawRoot));
         this.entries = Collections.unmodifiableList(new ArrayList<>(entries));
+        this.unsupportedEntryCount = unsupportedEntryCount;
+        this.unsupportedEntryReasons = Collections.unmodifiableList(new ArrayList<>(unsupportedEntryReasons));
     }
 
     @NotNull
@@ -64,6 +76,20 @@ public final class MetadataDocument {
         return entries;
     }
 
+    /**
+     * Entries this parser could not model. They must not be written back out: serialising the parsed
+     * entries alone would silently drop them, and a dropped registration is a permission removed by
+     * accident. Callers are expected to refuse to rewrite such a document.
+     */
+    public int unsupportedEntryCount() {
+        return unsupportedEntryCount;
+    }
+
+    @NotNull
+    public List<String> unsupportedEntryReasons() {
+        return unsupportedEntryReasons;
+    }
+
     @NotNull
     public static MetadataDocument parse(@NotNull Path path) throws IOException {
         String content = Files.readString(path);
@@ -75,16 +101,18 @@ public final class MetadataDocument {
         try {
             JsonNode root = MAPPER.readTree(json);
             if (root.isArray()) {
-                List<ReflectionEntry> list = parseReflectionArray(root);
-                return new MetadataDocument(Format.REFLECT_CONFIG, Collections.emptyMap(), list);
+                ParseResult result = parseReflectionArray(root);
+                return new MetadataDocument(Format.REFLECT_CONFIG, Collections.emptyMap(), result.entries(),
+                        result.unsupportedCount(), result.reasons());
             } else if (root.isObject()) {
                 @SuppressWarnings("unchecked")
                 Map<String, Object> rootMap = MAPPER.readValue(json, Map.class);
                 JsonNode reflectionNode = root.get("reflection");
-                List<ReflectionEntry> list = (reflectionNode != null && reflectionNode.isArray())
+                ParseResult result = (reflectionNode != null && reflectionNode.isArray())
                         ? parseReflectionArray(reflectionNode)
-                        : Collections.emptyList();
-                return new MetadataDocument(Format.REACHABILITY_METADATA, rootMap, list);
+                        : new ParseResult(Collections.emptyList(), 0, Collections.emptyList());
+                return new MetadataDocument(Format.REACHABILITY_METADATA, rootMap, result.entries(),
+                        result.unsupportedCount(), result.reasons());
             } else {
                 throw new IllegalArgumentException("Expected JSON array or JSON object for reflection metadata");
             }
@@ -93,15 +121,23 @@ public final class MetadataDocument {
         }
     }
 
-    private static List<ReflectionEntry> parseReflectionArray(JsonNode arrayNode) {
+    private record ParseResult(List<ReflectionEntry> entries, int unsupportedCount, List<String> reasons) {
+    }
+
+    private static ParseResult parseReflectionArray(JsonNode arrayNode) {
         List<ReflectionEntry> entries = new ArrayList<>();
+        List<String> reasons = new ArrayList<>();
+        int index = 0;
         for (JsonNode node : arrayNode) {
             ReflectionEntry entry = parseReflectionEntry(node);
             if (entry != null) {
                 entries.add(entry);
+            } else {
+                reasons.add("entry[" + index + "]: " + node);
             }
+            index++;
         }
-        return entries;
+        return new ParseResult(entries, reasons.size(), reasons);
     }
 
     public static ReflectionEntry parseReflectionEntry(@NotNull JsonNode node) {
@@ -201,7 +237,11 @@ public final class MetadataDocument {
             if (mNode.hasNonNull("name")) {
                 String mName = mNode.get("name").asText();
                 List<String> paramTypes = new ArrayList<>();
-                if (mNode.has("parameterTypes") && mNode.get("parameterTypes").isArray()) {
+                // "no parameterTypes key" (every overload) and "parameterTypes: []" (the zero-arg
+                // member) are different permissions; keep them apart instead of collapsing both to
+                // an empty list on the way in and out again.
+                boolean parameterTypesSpecified = mNode.has("parameterTypes");
+                if (parameterTypesSpecified && mNode.get("parameterTypes").isArray()) {
                     for (JsonNode pNode : mNode.get("parameterTypes")) {
                         paramTypes.add(pNode.asText());
                     }
@@ -212,7 +252,7 @@ public final class MetadataDocument {
                         extra.put(key, MAPPER.convertValue(mNode.get(key), Object.class));
                     }
                 });
-                result.add(new MethodConfig(mName, paramTypes, extra));
+                result.add(new MethodConfig(mName, paramTypes, parameterTypesSpecified, extra));
             }
         }
         return result;
@@ -223,6 +263,12 @@ public final class MetadataDocument {
         List<Map<String, Object>> entriesList = new ArrayList<>();
         for (ReflectionEntry entry : updatedEntries) {
             entriesList.add(entry.toMap());
+        }
+
+        if (unsupportedEntryCount > 0) {
+            throw new IllegalStateException("Refusing to rewrite a document with "
+                    + unsupportedEntryCount + " unsupported reflection entries; they would be lost: "
+                    + unsupportedEntryReasons);
         }
 
         try {

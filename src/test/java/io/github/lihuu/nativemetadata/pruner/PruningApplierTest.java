@@ -111,4 +111,78 @@ class PruningApplierTest {
                 Map.of("test.json", tempDir.resolve("src.json"))
         ));
     }
+
+    @Test
+    void doesNotPartiallyApplyWhenOneDocumentCannotBeSerialized(@TempDir Path tempDir) throws IOException {
+        Path buildDir = tempDir.resolve("target");
+        Path outputDir = buildDir.resolve("classes");
+        String resA = "META-INF/native-image/test/a/reflect-config.json";
+        String resB = "META-INF/native-image/test/b/reflect-config.json";
+
+        String jsonA = "[{\"name\": \"com.example.A\"}]";
+        String jsonB = "[{\"name\": \"com.example.B\"}, {\"broken\": true}]";
+        for (String[] pair : new String[][]{{resA, jsonA}, {resB, jsonB}}) {
+            Path file = outputDir.resolve(pair[0]);
+            Files.createDirectories(file.getParent());
+            Files.writeString(file, pair[1]);
+        }
+
+        PruningApplier applier = new PruningApplier(buildDir, outputDir, false);
+        Map<String, MetadataDocument> docs = Map.of(
+                resA, MetadataDocument.parse(jsonA),
+                resB, MetadataDocument.parse(jsonB));
+
+        assertThrows(IllegalStateException.class, () -> applier.apply(
+                Map.of(resA, Collections.emptyList(), resB, Collections.emptyList()),
+                docs,
+                Map.of()));
+
+        // Nothing may have been written: a partially pruned tree is worse than an untouched one.
+        assertEquals(jsonA, Files.readString(outputDir.resolve(resA)));
+        assertEquals(jsonB, Files.readString(outputDir.resolve(resB)));
+        assertFalse(Files.exists(buildDir.resolve("native-metadata/candidates")),
+                "candidates must not be written when the plan cannot be completed");
+    }
+
+    @Test
+    void rejectsSymlinkedOutputBeforeAnyWrite(@TempDir Path tempDir) throws IOException {
+        Path build = tempDir.resolve("target");
+        Path source = tempDir.resolve("src/main/resources");
+        Files.createDirectories(build);
+        Files.createDirectories(source);
+        Path protectedFile = source.resolve("reflect-config.json");
+        Files.writeString(protectedFile, "source must survive");
+        Files.createSymbolicLink(build.resolve("classes"), source);
+        PruningApplier applier = new PruningApplier(build, build.resolve("classes"), false);
+        assertThrows(IllegalArgumentException.class, () -> applier.apply(
+                Map.of("reflect-config.json", List.of()),
+                Map.of("reflect-config.json", MetadataDocument.parse("[]")), Map.of()));
+        assertEquals("source must survive", Files.readString(protectedFile));
+        assertFalse(Files.exists(build.resolve("native-metadata/candidates")));
+    }
+
+    @Test
+    void rejectsSymlinkedCandidateDirectoryInDryRun(@TempDir Path tempDir) throws IOException {
+        Path build = tempDir.resolve("target");
+        Path outside = tempDir.resolve("outside");
+        Files.createDirectories(build.resolve("native-metadata"));
+        Files.createDirectories(outside);
+        Files.createSymbolicLink(build.resolve("native-metadata/candidates"), outside);
+        PruningApplier applier = new PruningApplier(build, build.resolve("classes"), true);
+        assertThrows(IllegalArgumentException.class, () -> applier.apply(
+                Map.of("reflect-config.json", List.of()),
+                Map.of("reflect-config.json", MetadataDocument.parse("[]")), Map.of()));
+        assertFalse(Files.exists(outside.resolve("reflect-config.json")));
+    }
+
+    @Test
+    void rejectsResourcePathTraversalInDryRun(@TempDir Path tempDir) {
+        Path build = tempDir.resolve("target");
+        String resource = "../../../escape.json";
+        PruningApplier applier = new PruningApplier(build, build.resolve("classes"), true);
+        assertThrows(IllegalArgumentException.class, () -> applier.apply(
+                Map.of(resource, List.of()), Map.of(resource, MetadataDocument.parse("[]")), Map.of()));
+        assertFalse(Files.exists(tempDir.resolve("escape.json")));
+    }
+
 }

@@ -7,10 +7,14 @@ import org.jetbrains.annotations.NotNull;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
 public final class PruningApplier {
+
+    private record PendingWrite(Path destination, String content) {
+    }
 
     private final Path buildDirectory;
     private final Path outputDirectory;
@@ -28,7 +32,12 @@ public final class PruningApplier {
         Path normalizedBuildDir = buildDirectory.toAbsolutePath().normalize();
         Path candidateRoot = normalizedBuildDir.resolve("native-metadata/candidates");
 
-        // Step 1: Always write candidate files to buildDirectory/native-metadata/candidates/
+        // Everything is planned and serialised first. A failure part-way through writing would
+        // otherwise leave some resources pruned and others not, which is exactly the "partially
+        // applied configuration" state the analysis must never produce.
+        List<PendingWrite> candidates = new ArrayList<>();
+        List<PendingWrite> outputs = new ArrayList<>();
+
         for (Map.Entry<String, List<ReflectionEntry>> entry : prunedConfigs.entrySet()) {
             String resourcePath = entry.getKey();
             MetadataDocument doc = originalDocs.get(resourcePath);
@@ -36,47 +45,64 @@ public final class PruningApplier {
                 continue;
             }
             String serialized = doc.serialize(entry.getValue());
-            Path candidateFile = candidateRoot.resolve(resourcePath);
-            if (candidateFile.getParent() != null) {
-                Files.createDirectories(candidateFile.getParent());
-            }
-            Files.writeString(candidateFile, serialized);
-        }
+            Path candidate = checkedDestination(normalizedBuildDir, candidateRoot, resourcePath);
+            candidates.add(new PendingWrite(candidate, serialized));
 
-        // Step 2: In dry-run mode, do not modify output directory
-        if (dryRun) {
-            return;
-        }
-
-        // Step 3: Verify outputDirectory is strictly within build directory (target/)
-        Path normalizedOutputDir = outputDirectory.toAbsolutePath().normalize();
-        if (!normalizedOutputDir.startsWith(normalizedBuildDir)) {
-            throw new IllegalArgumentException("Output directory is outside build directory: " + outputDirectory);
-        }
-
-        // Step 4: Write pruned configurations to outputDirectory
-        for (Map.Entry<String, List<ReflectionEntry>> entry : prunedConfigs.entrySet()) {
-            String resourcePath = entry.getKey();
-            MetadataDocument doc = originalDocs.get(resourcePath);
-            if (doc == null) {
+            if (dryRun) {
                 continue;
             }
-            Path targetFile = outputDirectory.resolve(resourcePath).toAbsolutePath().normalize();
-            if (!targetFile.startsWith(normalizedBuildDir)) {
-                throw new IllegalArgumentException("Target file is outside build directory: " + targetFile);
+
+            Path normalizedOutputDir = outputDirectory.toAbsolutePath().normalize();
+            if (!normalizedOutputDir.startsWith(normalizedBuildDir)) {
+                throw new IllegalArgumentException("Output directory is outside build directory: " + outputDirectory);
             }
 
+            Path targetFile = checkedDestination(normalizedBuildDir, normalizedOutputDir, resourcePath);
             for (Path srcPath : originalSourceFiles.values()) {
-                if (srcPath.toAbsolutePath().normalize().equals(targetFile)) {
+                if (srcPath.toAbsolutePath().normalize().equals(targetFile)
+                        || (Files.exists(srcPath) && Files.exists(targetFile)
+                        && Files.isSameFile(srcPath, targetFile))) {
                     throw new IllegalArgumentException("Target file would overwrite source file: " + targetFile);
                 }
             }
-
-            String serialized = doc.serialize(entry.getValue());
-            if (targetFile.getParent() != null) {
-                Files.createDirectories(targetFile.getParent());
-            }
-            Files.writeString(targetFile, serialized);
+            outputs.add(new PendingWrite(targetFile, serialized));
         }
+
+        for (PendingWrite write : candidates) {
+            writeFile(write);
+        }
+        for (PendingWrite write : outputs) {
+            writeFile(write);
+        }
+    }
+
+    private static Path checkedDestination(Path buildDirectory, Path root, String resourcePath) {
+        Path normalizedRoot = root.toAbsolutePath().normalize();
+        Path destination = normalizedRoot.resolve(resourcePath).normalize();
+        if (!normalizedRoot.startsWith(buildDirectory) || !destination.startsWith(normalizedRoot)
+                || destination.equals(normalizedRoot)) {
+            throw new IllegalArgumentException("Resource escapes its output directory: " + resourcePath);
+        }
+        // Validate candidates as well as applied outputs before creating any directory. A lexical
+        // target/ prefix is insufficient when an existing component points back into src/.
+        Path current = buildDirectory;
+        if (Files.isSymbolicLink(current)) {
+            throw new IllegalArgumentException("Build directory is a symbolic link: " + current);
+        }
+        for (Path component : buildDirectory.relativize(destination)) {
+            current = current.resolve(component);
+            if (Files.isSymbolicLink(current)) {
+                throw new IllegalArgumentException("Output path contains a symbolic link: " + current);
+            }
+        }
+        return destination;
+    }
+
+    private static void writeFile(PendingWrite write) throws IOException {
+        Path parent = write.destination().getParent();
+        if (parent != null) {
+            Files.createDirectories(parent);
+        }
+        Files.writeString(write.destination(), write.content());
     }
 }

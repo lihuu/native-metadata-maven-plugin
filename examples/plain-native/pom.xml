@@ -1,0 +1,123 @@
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <groupId>com.example.plain</groupId>
+    <artifactId>plain-native-sample</artifactId>
+    <version>1.0.0</version>
+    <packaging>jar</packaging>
+
+    <name>plain-native sample</name>
+    <description>
+        Standalone Maven project proving that reflection metadata pruning has an observable effect on
+        a GraalVM native image. It does not inherit from, or depend on, the plugin's own build.
+    </description>
+
+    <properties>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+        <!--
+          Business bytecode target. Java 17 is the baseline the plugin promises; override with
+          -Dbusiness.release=21 / 25 to run the same flow against newer bytecode.
+        -->
+        <business.release>17</business.release>
+        <!--
+          Version of the plugin under test. Pass -Dnative.metadata.version=<candidate> to consume a
+          specific build; the repository copy in CI overrides it through the Invoker properties.
+        -->
+        <native.metadata.version>1.1.0</native.metadata.version>
+        <!--
+          Ranges asserted in the same JVM by the enforcer execution below. The verification harness
+          narrows these per case (for example [17,18) and [3.9.9,3.9.10)) so that a job which picks
+          the wrong JDK or Maven fails instead of quietly verifying something else.
+        -->
+        <required.java.version>[17,)</required.java.version>
+        <required.maven.version>[3.9.9,)</required.maven.version>
+    </properties>
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <version>3.14.0</version>
+                <configuration>
+                    <release>${business.release}</release>
+                </configuration>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-jar-plugin</artifactId>
+                <version>3.4.2</version>
+                <configuration>
+                    <archive>
+                        <manifest>
+                            <mainClass>com.example.plain.App</mainClass>
+                        </manifest>
+                    </archive>
+                </configuration>
+            </plugin>
+            <!--
+              Same-process assertion of the JVM and Maven actually running this build. A PATH or
+              toolchain mistake shows up here instead of silently changing what is being verified.
+            -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-enforcer-plugin</artifactId>
+                <version>3.5.0</version>
+                <executions>
+                    <execution>
+                        <id>assert-runtime</id>
+                        <goals>
+                            <goal>enforce</goal>
+                        </goals>
+                        <configuration>
+                            <rules>
+                                <requireJavaVersion>
+                                    <version>${required.java.version}</version>
+                                </requireJavaVersion>
+                                <requireMavenVersion>
+                                    <version>${required.maven.version}</version>
+                                </requireMavenVersion>
+                            </rules>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+            <plugin>
+                <groupId>io.github.lihuu</groupId>
+                <artifactId>native-metadata-maven-plugin</artifactId>
+                <version>${native.metadata.version}</version>
+                <executions>
+                    <execution>
+                        <id>analyze-metadata</id>
+                        <phase>process-classes</phase>
+                        <goals>
+                            <goal>analyze</goal>
+                        </goals>
+                    </execution>
+                    <execution>
+                        <id>prune-metadata</id>
+                        <phase>process-classes</phase>
+                        <goals>
+                            <goal>prune</goal>
+                        </goals>
+                        <configuration>
+                            <rulesFile>${project.basedir}/rules.json</rulesFile>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+        </plugins>
+    </build>
+
+    <profiles>
+        <!-- A: baseline. Builds the native image from the untouched source configuration. -->
+        <profile>
+            <id>baseline</id>
+            <properties>
+                <native.metadata.skip>true</native.metadata.skip>
+            </properties>
+        </profile>
+    </profiles>
+</project>

@@ -1,10 +1,11 @@
 package io.github.lihuu.nativemetadata.bytecode;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
-import javax.tools.JavaCompiler;
-import javax.tools.ToolProvider;
+import io.github.lihuu.nativemetadata.support.JavaFixtureCompiler;
+
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -42,13 +43,8 @@ class ClassfileScannerTest {
         Path classesDir = tempDir.resolve("classes");
         Files.createDirectories(classesDir);
 
-        JavaCompiler compiler = ToolProvider.getSystemJavaCompiler();
-        assertNotNull(compiler, "System Java compiler required");
-        int exitCode = compiler.run(null, null, null,
-                "--release", "25",
-                "-d", classesDir.toString(),
-                sourceFile.toString());
-        assertEquals(0, exitCode, "Compilation of test fixture should succeed");
+        // Java 17 baseline: the fixture must be compilable and readable on the oldest supported JVM.
+        JavaFixtureCompiler.compile(classesDir, List.of(sourceFile));
 
         ClassfileScanner scanner = new ClassfileScanner();
         BytecodeInventory inventory = scanner.scan(List.of(classesDir.toString()), Set.of("example.Message"));
@@ -82,4 +78,47 @@ class ClassfileScannerTest {
         assertFalse(annotationReferences.isEmpty(), "Should capture nested annotation reference to Message.class");
         assertEquals("example.Message", annotationReferences.get(0).target());
     }
+
+    @Test
+    void zeroComponentRecordIsRecognisedAsARecord(@TempDir Path tempDir) throws IOException {
+        // A record with no components has no Record attribute components, so "is a record" cannot be
+        // inferred from them: the ACC_RECORD flag is the only authoritative signal.
+        Path src = tempDir.resolve("example");
+        Files.createDirectories(src);
+        Path sourceFile = src.resolve("Empty.java");
+        Files.writeString(sourceFile, "package example; public record Empty() { }");
+
+        Path classesDir = tempDir.resolve("classes-empty");
+        JavaFixtureCompiler.compile(classesDir, List.of(sourceFile));
+
+        ClassInventory inventory = new ClassfileScanner()
+                .scan(List.of(classesDir.toString()), Set.of("example.Empty"))
+                .findClass("example.Empty")
+                .orElse(null);
+
+        assertNotNull(inventory, "example.Empty must be present");
+        assertTrue(inventory.isRecord(), "a zero-component record is still a record");
+        assertTrue(inventory.recordComponents().isEmpty());
+    }
+
+    @Test
+    void malformedClassFailsWithItsSourceInsteadOfBeingSkipped(@TempDir Path tempDir) throws IOException {
+        Path classesDir = tempDir.resolve("classes-broken");
+        Files.createDirectories(classesDir);
+        Path broken = classesDir.resolve("Broken.class");
+        Files.write(broken, new byte[]{(byte) 0xCA, (byte) 0xFE, (byte) 0xBA, (byte) 0xBE, 0, 0});
+
+        ClassfileScanner scanner = new ClassfileScanner();
+        IOException tooShort = assertThrows(IOException.class,
+                () -> scanner.scan(List.of(classesDir.toString()), Set.of("example.Empty")));
+        assertTrue(tooShort.getMessage().contains(broken.toString()),
+                "the error must name the file: " + tooShort.getMessage());
+
+        Files.write(broken, new byte[]{(byte) 0xCA, (byte) 0xFE, (byte) 0xBA, (byte) 0xBE, 0, 0, 0, 61, 1, 2, 3, 4});
+        IOException unparsable = assertThrows(IOException.class,
+                () -> scanner.scan(List.of(classesDir.toString()), Set.of("example.Empty")));
+        assertTrue(unparsable.getMessage().contains(broken.toString()),
+                "the error must name the file: " + unparsable.getMessage());
+    }
+
 }

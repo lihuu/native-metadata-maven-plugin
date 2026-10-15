@@ -73,7 +73,10 @@ public final class PruningEngine {
                 throw new IllegalStateException("Pruning rule cannot change type name: "
                         + rule.type() + " -> " + rule.replacement().name());
             }
-            if (rule.condition() != null && !rule.condition().equals(rule.replacement().condition())) {
+            // Symmetric on purpose. The previous form only compared when the rule named a condition,
+            // so a rule without one could silently attach a condition to the replacement - a change of
+            // meaning smuggled in through a field the check skipped.
+            if (!java.util.Objects.equals(rule.condition(), rule.replacement().condition())) {
                 throw new IllegalStateException("Pruning rule cannot change entry condition: "
                         + rule.condition() + " -> " + rule.replacement().condition());
             }
@@ -203,12 +206,17 @@ public final class PruningEngine {
         if (target.allPublicFields() && !covering.allPublicFields()) {
             return false;
         }
-        if (!covering.allDeclaredFields()) {
-            for (FieldConfig fc : target.fields()) {
-                boolean found = covering.fields().stream().anyMatch(f -> f.name().equals(fc.name()));
-                if (!found) {
-                    return false;
-                }
+        for (FieldConfig fc : target.fields()) {
+            // A broad flag says "every declared field", which is a known permission. It says nothing
+            // about member-level properties this model does not interpret, so those always need an
+            // explicit entry carrying the same properties.
+            if (covering.allDeclaredFields() && fc.extra().isEmpty()) {
+                continue;
+            }
+            boolean found = covering.fields().stream()
+                    .anyMatch(f -> f.name().equals(fc.name()) && f.extra().equals(fc.extra()));
+            if (!found) {
+                return false;
             }
         }
 
@@ -219,15 +227,15 @@ public final class PruningEngine {
         if (target.allPublicConstructors() && !covering.allDeclaredConstructors() && !covering.allPublicConstructors()) {
             return false;
         }
-        if (!covering.allDeclaredConstructors()) {
-            for (MethodConfig mc : target.methods()) {
-                if (mc.name().equals("<init>")) {
-                    boolean found = covering.methods().stream().anyMatch(m -> m.name().equals("<init>")
-                            && m.parameterTypes().equals(mc.parameterTypes()));
-                    if (!found) {
-                        return false;
-                    }
-                }
+        for (MethodConfig mc : target.methods()) {
+            if (!mc.name().equals("<init>")) {
+                continue;
+            }
+            if (covering.allDeclaredConstructors() && mc.extra().isEmpty()) {
+                continue;
+            }
+            if (!memberCoveredBy(mc, covering.methods())) {
+                return false;
             }
         }
 
@@ -238,15 +246,15 @@ public final class PruningEngine {
         if (target.allPublicMethods() && !covering.allPublicMethods()) {
             return false;
         }
-        if (!covering.allDeclaredMethods()) {
-            for (MethodConfig mc : target.methods()) {
-                if (!mc.name().equals("<init>")) {
-                    boolean found = covering.methods().stream().anyMatch(m -> m.name().equals(mc.name())
-                            && m.parameterTypes().equals(mc.parameterTypes()));
-                    if (!found) {
-                        return false;
-                    }
-                }
+        for (MethodConfig mc : target.methods()) {
+            if (mc.name().equals("<init>")) {
+                continue;
+            }
+            if (covering.allDeclaredMethods() && mc.extra().isEmpty()) {
+                continue;
+            }
+            if (!memberCoveredBy(mc, covering.methods())) {
+                return false;
             }
         }
 
@@ -259,15 +267,15 @@ public final class PruningEngine {
         }
         for (MethodConfig mc : target.queriedMethods()) {
             boolean constructor = mc.name().equals("<init>");
-            boolean explicitMatch = covering.methods().stream().anyMatch(m -> m.name().equals(mc.name())
-                    && m.parameterTypes().equals(mc.parameterTypes()))
-                    || covering.queriedMethods().stream().anyMatch(m -> m.name().equals(mc.name())
-                    && m.parameterTypes().equals(mc.parameterTypes()));
             boolean allCovered = constructor
                     ? covering.allDeclaredConstructors() || covering.queryAllDeclaredConstructors()
                     : covering.allDeclaredMethods() || covering.queryAllDeclaredMethods();
-            boolean found = explicitMatch || allCovered;
-            if (!found) {
+            if (allCovered && mc.extra().isEmpty()) {
+                continue;
+            }
+            boolean explicitMatch = memberCoveredBy(mc, covering.methods())
+                    || memberCoveredBy(mc, covering.queriedMethods());
+            if (!explicitMatch) {
                 return false;
             }
         }
@@ -298,5 +306,38 @@ public final class PruningEngine {
         }
 
         return true;
+    }
+
+    /**
+     * Whether one member entry of {@code covering} grants what {@code target} asks for.
+     *
+     * <ul>
+     *   <li>An entry without a {@code parameterTypes} key means every overload with that name, so it
+     *       covers anything with that name. An entry with an explicit list covers only that exact
+     *       signature - and never "every overload".</li>
+     *   <li>Member-level properties the model does not interpret must match exactly. Ignoring them
+     *       would let a covering entry that does not grant, say, write access displace a target entry
+     *       that does.</li>
+     * </ul>
+     */
+    private static boolean memberCoveredBy(MethodConfig target, List<MethodConfig> covering) {
+        for (MethodConfig candidate : covering) {
+            if (!candidate.name().equals(target.name())) {
+                continue;
+            }
+            if (candidate.parameterTypesSpecified()) {
+                // The candidate names one signature. It covers the target only if the target names
+                // the same one; a target that asks for every overload needs an entry that also does.
+                if (!target.parameterTypesSpecified()
+                        || !candidate.parameterTypes().equals(target.parameterTypes())) {
+                    continue;
+                }
+            }
+            if (!candidate.extra().equals(target.extra())) {
+                continue;
+            }
+            return true;
+        }
+        return false;
     }
 }
