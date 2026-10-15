@@ -19,11 +19,14 @@ on:
   pull_request:
     branches: [ main ]
 
-# One run per branch at a time: pushing twice in a row cancels the superseded run instead of paying
-# for both. The cancelled run is not a failure - the newer commit replaces it.
+# One run per branch at a time. Cancelling the superseded run is right for a pull request - the head
+# moved and the newer run covers it. It is wrong for a push to main: there it throws away the
+# post-merge verification of a commit that nothing else will re-run, and a documentation-only merge
+# landing a minute later does exactly that. (Observed on 1e57e3a: the run that would have verified the
+# change-detector commit on main was cancelled by the docs merge that followed it.)
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read
