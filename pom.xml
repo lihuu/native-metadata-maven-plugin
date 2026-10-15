@@ -6,7 +6,7 @@
 
     <groupId>io.github.lihuu</groupId>
     <artifactId>native-metadata-maven-plugin</artifactId>
-    <version>1.1.0</version>
+    <version>1.2.0</version>
     <!--
       1.1.0, not 1.0.0. 1.0.0 is published on Maven Central and is the Java 25 / Class-File API build.
       Reusing that number would mean that any project which fails to stage this build can silently

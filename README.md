@@ -46,7 +46,7 @@ Optimizes native metadata configurations in compilation outputs (`target/classes
 <plugin>
     <groupId>io.github.lihuu</groupId>
     <artifactId>native-metadata-maven-plugin</artifactId>
-    <version>1.1.0</version>
+    <version>1.2.0</version>
     <executions>
         <execution>
             <id>prune-metadata</id>
