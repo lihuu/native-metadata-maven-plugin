@@ -2,7 +2,7 @@
 
 日期：2026-10-15
 
-状态：实现与本机验证完成，java-pi 实际项目试用已通过；IDEA、远程 CI、候选提交/发布仍未执行。逐条证据见 [validation/migration-results.md](validation/migration-results.md)。
+状态：实现与本机验证完成，java-pi 实际项目试用已通过；IDEA、远程 CI、候选实现已提交，发布仍未执行。逐条证据见 [validation/migration-results.md](validation/migration-results.md)。
 
 基线提交：`109ceaf`。本文中的“计划执行项”描述的是验收设计；实际执行状态以 validation 目录为准。
 
@@ -421,7 +421,7 @@ mvn -B -ntp verify -Pspring-native-it -DnativeImageExecutable=<绝对路径>
 
 ## 10. 最终验收清单
 
-本机已通过项如下；AC-11 的远程 CI、AC-12 的 IDEA 与 AC-14 的候选提交/发布仍待执行。
+本机已通过项如下；AC-11 的远程 CI、AC-12 的 IDEA 与 AC-14 的发布仍待执行。
 
 - [ ] AC-01：GraalVM 17 下两个 goal 与原生构建流程真实执行；O17 补充验证无 GraalVM 的分析/裁剪。
 - [ ] AC-02：六个 R job 消费 JDK 25 构建的同一 JAR，版本和 SHA-256 有证据。

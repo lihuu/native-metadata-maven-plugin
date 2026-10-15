@@ -6,9 +6,9 @@ Artifact under test: `io.github.lihuu:native-metadata-maven-plugin:1.1.0`,
 sha256 `3881f13ceab5f47fbe200b0b66f4cc168986bdcbf8e75b0b18084d9e0d22ff18`,
 built once with GraalVM CE 25.0.2 / Maven 3.9.9 at `--release 17` (class-file major 61).
 
-`candidateCommit` is **null**: none of this is committed. The hash above identifies the frozen working
-tree artifact that every result in this file was produced against, but there is no git object to name
-yet, and no release has been cut. `1.1.0` is a working-tree version number, not a published one.
+Source candidate commit: `c20b952726128af25b757ce7325db7039f84f2ce`. The production sources and POM in that commit
+match the source manifest of the frozen artifact verified below. Documentation-only follow-ups do
+not change the tested implementation. `1.1.0` remains an unpublished candidate; no release has been cut.
 
 Evidence paths below are relative to `/private/tmp/native-metadata-pi-asm/`.
 
@@ -42,7 +42,7 @@ Linux x86_64 CI has **not** been executed here; see AC-11.
 | AC-11 | No required native scenario silently skipped; commands, exit codes and logs archived | PASS locally / `NOT_RUN` in CI | Local runs assert the staged hash and fail when `native-image` is missing. The Linux workflow and the pinned-toolchain installer are written and were exercised for the installer (real GraalVM 17 / Maven 3.9.9 / 3.10.0 archives resolve to a runnable home, `evidence/installer-*-version.log`), but **no GitHub Actions job has been executed**: `NOT_RUN` |
 | AC-12 | Maintainer terminal/IDEA walkthrough and at least one real project trial | PARTIAL | Real project trial: `java-pi` at `a4381a2c`, isolated copy, against this exact frozen hash - baseline native build + MCP loop, dry-run 102/102 owned types resolved with 0 changes, apply + native build + MCP loop; see [java-pi-trial.md](java-pi-trial.md). IDEA walkthrough: `NOT_RUN` - no IntelliJ installation exists on this machine and no computer-use tool is exposed, so the IDE gate cannot be performed here; the runbook is in [idea-walkthrough.md](idea-walkthrough.md) |
 | AC-13 | README separates Maven JVM, build JDK, business target and native toolchain | PASS | `README.md` "Runtime and compatibility" |
-| AC-14 | Every result belongs to the candidate artifact; release uses a new version number | PARTIAL | Every result is pinned to the 1.1.0 hash above and the harness refuses to run otherwise. The version number is new, so the published Java 25 `1.0.0` is not replaced. However **nothing has been committed, tagged or published**: `candidateCommit` is null and the release step remains open |
+| AC-14 | Every result belongs to the candidate artifact; release uses a new version number | PARTIAL | Every result is pinned to the 1.1.0 hash above and the harness refuses to run otherwise. The version number is new, so the published Java 25 `1.0.0` is not replaced. The tested sources are now committed as `c20b952726128af25b757ce7325db7039f84f2ce`. Tagging and publishing have not been performed; the release step remains open |
 | AC-15 | Two independent Maven projects outside the checkout, consumed by coordinates only | PASS | Both actually executed from a kit containing no plugin source/classes/reactor; Spring included AOT, native build and real HTTP. See [detached-consumers.md](detached-consumers.md) for exact evidence and the corrected postcondition rerun |
 
 ## Runs against the frozen artifact
